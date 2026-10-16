@@ -1,72 +1,96 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+
 import '../app_theme.dart';
+import '../../core/models/song.dart';
+import '../library/song_list_tile.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  static const List<_Song> _mostPlayed = [
-    _Song(
+  static const List<Song> _mostPlayed = [
+    Song(
       title: 'Midnight City',
       artist: 'M83',
+      album: 'Hurry Up, We’re Dreaming',
+      duration: '4:03',
       icon: Icons.nightlight_round,
       color: Color(0xFF6750A4),
-      plays: '128 reproducciones',
     ),
-    _Song(
+    Song(
       title: 'After Dark',
       artist: 'Mr.Kitty',
+      album: 'Time',
+      duration: '4:17',
       icon: Icons.dark_mode_rounded,
       color: Color(0xFF344B70),
-      plays: '96 reproducciones',
+      favorite: true,
     ),
-    _Song(
+    Song(
       title: 'Resonance',
       artist: 'HOME',
+      album: 'Odyssey',
+      duration: '3:32',
       icon: Icons.waves_rounded,
       color: Color(0xFF357F91),
-      plays: '84 reproducciones',
+      favorite: true,
     ),
-    _Song(
+    Song(
       title: 'Memory Reboot',
       artist: 'VØJ, Narvent',
+      album: 'Memory Reboot',
+      duration: '3:00',
       icon: Icons.blur_on_rounded,
       color: Color(0xFF8C476C),
-      plays: '72 reproducciones',
+      favorite: true,
     ),
-    _Song(
+    Song(
       title: 'Snowfall',
       artist: 'Øneheart',
+      album: 'Snowfall',
+      duration: '2:03',
       icon: Icons.ac_unit_rounded,
       color: Color(0xFF526B99),
-      plays: '61 reproducciones',
+      favorite: true,
     ),
   ];
 
-  static const List<_Song> _favorites = [
-    _Song(
+  static const List<Song> _favorites = [
+    Song(
       title: 'After Dark',
       artist: 'Mr.Kitty',
+      album: 'Time',
+      duration: '4:17',
       icon: Icons.dark_mode_rounded,
       color: Color(0xFF344B70),
+      favorite: true,
     ),
-    _Song(
+    Song(
       title: 'Resonance',
       artist: 'HOME',
+      album: 'Odyssey',
+      duration: '3:32',
       icon: Icons.waves_rounded,
       color: Color(0xFF357F91),
+      favorite: true,
     ),
-    _Song(
+    Song(
       title: 'Snowfall',
       artist: 'Øneheart',
+      album: 'Snowfall',
+      duration: '2:03',
       icon: Icons.ac_unit_rounded,
       color: Color(0xFF526B99),
+      favorite: true,
     ),
-    _Song(
+    Song(
       title: 'Memory Reboot',
       artist: 'VØJ, Narvent',
+      album: 'Memory Reboot',
+      duration: '3:00',
       icon: Icons.blur_on_rounded,
       color: Color(0xFF8C476C),
+      favorite: true,
     ),
   ];
 
@@ -109,7 +133,7 @@ class HomeScreen extends StatelessWidget {
                     isDesktop: isDesktop,
                   ),
                   SizedBox(height: isDesktop ? 22 : 18),
-                  _buildFavoritesList(),
+                  _buildFavoritesList(isDesktop),
                 ],
               ),
             ),
@@ -231,7 +255,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFavoritesList() {
+  Widget _buildFavoritesList(bool isDesktop) {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
@@ -240,45 +264,20 @@ class HomeScreen extends StatelessWidget {
       ),
       child: Column(
         children: [
-          for (int i = 0; i < _favorites.length; i++) ...[
-            _FavoriteSongTile(song: _favorites[i]),
-            if (i < _favorites.length - 1)
-              Divider(
-                height: 1,
-                indent: 68,
-                endIndent: 16,
-                color: AppTheme.surfaceVariant,
-              ),
-          ],
+          for (int i = 0; i < _favorites.length; i++)
+            SongListTile(song: _favorites[i], isDesktop: isDesktop),
         ],
       ),
     );
   }
 }
 
-class _Song {
-  final String title;
-  final String artist;
-  final IconData icon;
-  final Color color;
-  final String? plays;
-
-  const _Song({
-    required this.title,
-    required this.artist,
-    required this.icon,
-    required this.color,
-    this.plays,
-  });
-}
-
 class _AlbumArtwork extends StatelessWidget {
-  final _Song song;
+  final Song song;
   final double size;
   final double radius;
 
   const _AlbumArtwork({
-    super.key,
     required this.song,
     required this.size,
     this.radius = 14,
@@ -326,7 +325,7 @@ class _AlbumArtwork extends StatelessWidget {
 }
 
 class _PopularSongCard extends StatelessWidget {
-  final _Song song;
+  final Song song;
   final int rank;
   final double width;
 
@@ -420,62 +419,6 @@ class _PlayButton extends StatelessWidget {
           width: 38,
           height: 38,
           child: Icon(Icons.play_arrow_rounded, color: Colors.black, size: 25),
-        ),
-      ),
-    );
-  }
-}
-
-class _FavoriteSongTile extends StatelessWidget {
-  final _Song song;
-
-  const _FavoriteSongTile({required this.song});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return InkWell(
-      onTap: () {},
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            _AlbumArtwork(song: song, size: 46, radius: 10),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    song.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.favorite_rounded,
-              color: AppTheme.accent,
-              size: 20,
-            ),
-          ],
         ),
       ),
     );

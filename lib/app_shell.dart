@@ -20,6 +20,8 @@ class _AppShellState extends State<AppShell> {
   static const double _expandedWidth = 240;
   static const double _collapsedWidth = 72;
 
+  static const Duration _sidebarAnimationDuration = Duration(milliseconds: 250);
+
   static const List<String> _titles = [
     'Inicio',
     'Biblioteca',
@@ -128,12 +130,10 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _buildSidebar() {
-    final width = _sidebarExpanded ? _expandedWidth : _collapsedWidth;
-
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
-      width: width,
+      duration: _sidebarAnimationDuration,
+      curve: Curves.easeInOutCubic,
+      width: _sidebarExpanded ? _expandedWidth : _collapsedWidth,
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         color: AppTheme.surface,
@@ -146,68 +146,59 @@ class _AppShellState extends State<AppShell> {
         children: [
           SizedBox(
             height: 72,
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: _sidebarExpanded ? 12 : 8,
-                vertical: 16,
-              ),
-              child: _sidebarExpanded
-                  ? Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: Text(
-                              'MENÚ PRINCIPAL',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: IconButton(
-                            tooltip: null,
-                            padding: EdgeInsets.zero,
-                            onPressed: () {
-                              setState(() {
-                                _sidebarExpanded = false;
-                              });
-                            },
-                            icon: const Icon(
-                              Icons.menu_open_rounded,
-                              color: AppTheme.accent,
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : Center(
-                      child: SizedBox(
-                        width: 40,
-                        height: 40,
-                        child: IconButton(
-                          tooltip: null,
-                          padding: EdgeInsets.zero,
-                          onPressed: () {
-                            setState(() {
-                              _sidebarExpanded = true;
-                            });
-                          },
-                          icon: const Icon(
-                            Icons.menu_rounded,
-                            color: AppTheme.accent,
-                          ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned(
+                  left: 20,
+                  right: 52,
+                  top: 0,
+                  bottom: 0,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: AnimatedOpacity(
+                      duration: _sidebarAnimationDuration,
+                      opacity: _sidebarExpanded ? 1 : 0,
+                      child: Text(
+                        'MENÚ PRINCIPAL',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
                         ),
                       ),
                     ),
+                  ),
+                ),
+                AnimatedPositioned(
+                  duration: _sidebarAnimationDuration,
+                  curve: Curves.easeInOutCubic,
+                  top: 16,
+                  right: _sidebarExpanded ? 12 : 16,
+                  width: 40,
+                  height: 40,
+                  child: IconButton(
+                    tooltip: _sidebarExpanded
+                        ? 'Contraer menú'
+                        : 'Expandir menú',
+                    padding: EdgeInsets.zero,
+                    onPressed: () {
+                      setState(() {
+                        _sidebarExpanded = !_sidebarExpanded;
+                      });
+                    },
+                    icon: Icon(
+                      _sidebarExpanded
+                          ? Icons.menu_open_rounded
+                          : Icons.menu_rounded,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           for (int i = 0; i < _titles.length; i++) _buildSidebarItem(i),
@@ -215,24 +206,18 @@ class _AppShellState extends State<AppShell> {
           SizedBox(
             height: 28,
             child: ClipRect(
-              child: Align(
-                alignment: Alignment.topLeft,
-                heightFactor: 1,
-                child: Transform.translate(
-                  offset: const Offset(0, 12),
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 16),
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 150),
-                      opacity: _sidebarExpanded ? 1 : 0,
-                      child: Text(
-                        'DecibeX',
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 16),
+                child: AnimatedOpacity(
+                  duration: _sidebarAnimationDuration,
+                  opacity: _sidebarExpanded ? 1 : 0,
+                  child: Text(
+                    'DecibeX',
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
                     ),
                   ),
                 ),
@@ -249,10 +234,7 @@ class _AppShellState extends State<AppShell> {
     final selected = _selectedIndex == index;
 
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: _sidebarExpanded ? 12 : 8,
-        vertical: 3,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Material(
         color: selected ? AppTheme.surfaceVariant : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
@@ -262,42 +244,11 @@ class _AppShellState extends State<AppShell> {
           onTap: () => _selectPage(index),
           child: SizedBox(
             height: 48,
-            child: _sidebarExpanded
-                ? Row(
-                    children: [
-                      SizedBox(
-                        width: 44,
-                        child: Center(
-                          child: Icon(
-                            selected ? _selectedIcons[index] : _icons[index],
-                            color: selected
-                                ? AppTheme.accent
-                                : AppTheme.textSecondary,
-                            size: 22,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Text(
-                            _titles[index],
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: selected
-                                  ? AppTheme.accent
-                                  : Theme.of(context).colorScheme.onSurface,
-                              fontWeight: selected
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : Center(
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 44,
+                  child: Center(
                     child: Icon(
                       selected ? _selectedIcons[index] : _icons[index],
                       color: selected
@@ -306,6 +257,30 @@ class _AppShellState extends State<AppShell> {
                       size: 22,
                     ),
                   ),
+                ),
+                Expanded(
+                  child: AnimatedOpacity(
+                    duration: _sidebarAnimationDuration,
+                    opacity: _sidebarExpanded ? 1 : 0,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Text(
+                        _titles[index],
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.clip,
+                        style: TextStyle(
+                          color: selected ? AppTheme.accent : Colors.white,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
