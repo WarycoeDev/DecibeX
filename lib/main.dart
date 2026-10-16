@@ -12,11 +12,16 @@ class DecibeXApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'DecibeX',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark,
-      home: const AppShell(),
+    return AnimatedBuilder(
+      animation: AppTheme.notifier,
+      builder: (context, child) {
+        return MaterialApp(
+          title: 'DecibeX',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.current,
+          home: const AppShell(),
+        );
+      },
     );
   }
 }

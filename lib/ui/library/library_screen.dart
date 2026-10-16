@@ -301,7 +301,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
+                Icon(
                   Icons.music_note_rounded,
                   size: 17,
                   color: AppTheme.accent,

@@ -101,11 +101,7 @@ class _AppShellState extends State<AppShell> {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.graphic_eq_rounded,
-            color: AppTheme.accent,
-            size: 27,
-          ),
+          Icon(Icons.graphic_eq_rounded, color: AppTheme.accent, size: 27),
           const SizedBox(width: 10),
           const Text(
             'DecibeX',
