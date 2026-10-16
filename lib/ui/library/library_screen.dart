@@ -4,6 +4,8 @@ import '../app_theme.dart';
 import '../../core/models/song.dart';
 import 'song_list_tile.dart';
 
+enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
+
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
 
@@ -12,36 +14,36 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  static const List<_LibraryCategory> _categories = [
-    _LibraryCategory(
+  static const List<_LibraryTabData> _tabs = [
+    _LibraryTabData(
+      tab: _LibraryTab.songs,
+      title: 'Canciones',
+      icon: Icons.music_note_rounded,
+    ),
+    _LibraryTabData(
+      tab: _LibraryTab.podcasts,
       title: 'Podcasts',
-      subtitle: 'Tus programas',
       icon: Icons.podcasts_rounded,
-      color: Color(0xFF6750A4),
     ),
-    _LibraryCategory(
+    _LibraryTabData(
+      tab: _LibraryTab.playlists,
       title: 'Playlists',
-      subtitle: 'Listas personales',
       icon: Icons.queue_music_rounded,
-      color: Color(0xFF357F91),
     ),
-    _LibraryCategory(
+    _LibraryTabData(
+      tab: _LibraryTab.favorites,
       title: 'Favoritos',
-      subtitle: 'Canciones favoritas',
       icon: Icons.favorite_rounded,
-      color: Color(0xFFB94F73),
     ),
-    _LibraryCategory(
+    _LibraryTabData(
+      tab: _LibraryTab.artists,
       title: 'Artistas',
-      subtitle: 'Tu colección de artistas',
       icon: Icons.person_rounded,
-      color: Color(0xFF8C7047),
     ),
-    _LibraryCategory(
+    _LibraryTabData(
+      tab: _LibraryTab.albums,
       title: 'Álbumes',
-      subtitle: 'Álbumes guardados',
       icon: Icons.album_rounded,
-      color: Color(0xFF526B99),
     ),
   ];
 
@@ -115,7 +117,57 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ),
   ];
 
-  int _selectedCategory = -1;
+  _LibraryTab _selectedTab = _LibraryTab.songs;
+
+  List<Song> get _visibleSongs {
+    switch (_selectedTab) {
+      case _LibraryTab.songs:
+        return _songs;
+
+      case _LibraryTab.favorites:
+        return _songs.where((song) => song.favorite).toList();
+
+      case _LibraryTab.podcasts:
+      case _LibraryTab.playlists:
+      case _LibraryTab.artists:
+      case _LibraryTab.albums:
+        return const [];
+    }
+  }
+
+  String get _sectionTitle {
+    switch (_selectedTab) {
+      case _LibraryTab.songs:
+        return 'Todas las canciones';
+      case _LibraryTab.podcasts:
+        return 'Tus podcasts';
+      case _LibraryTab.playlists:
+        return 'Tus playlists';
+      case _LibraryTab.favorites:
+        return 'Canciones favoritas';
+      case _LibraryTab.artists:
+        return 'Tus artistas';
+      case _LibraryTab.albums:
+        return 'Tus álbumes';
+    }
+  }
+
+  String get _sectionSubtitle {
+    switch (_selectedTab) {
+      case _LibraryTab.songs:
+        return '${_visibleSongs.length} canciones en tu colección';
+      case _LibraryTab.podcasts:
+        return 'Tus programas y episodios';
+      case _LibraryTab.playlists:
+        return 'Tus listas de reproducción';
+      case _LibraryTab.favorites:
+        return '${_visibleSongs.length} canciones favoritas';
+      case _LibraryTab.artists:
+        return 'Artistas de tu colección';
+      case _LibraryTab.albums:
+        return 'Álbumes de tu colección';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -137,12 +189,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildHeader(context, isDesktop),
-                  SizedBox(height: isDesktop ? 32 : 26),
-                  _buildCategories(context, isDesktop),
-                  SizedBox(height: isDesktop ? 40 : 32),
-                  _buildSongsHeader(context, isDesktop),
+                  SizedBox(height: isDesktop ? 32 : 24),
+                  _buildTabs(),
+                  SizedBox(height: isDesktop ? 36 : 28),
+                  _buildSectionHeader(context, isDesktop),
                   const SizedBox(height: 16),
-                  _buildSongList(isDesktop),
+                  _buildContent(isDesktop),
                 ],
               ),
             ),
@@ -186,44 +238,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Widget _buildCategories(BuildContext context, bool isDesktop) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = isDesktop
-            ? (constraints.maxWidth / 210).floor().clamp(3, 5).toInt()
-            : constraints.maxWidth >= 500
-            ? 3
-            : 2;
+  Widget _buildTabs() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (int i = 0; i < _tabs.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            _LibraryTabButton(
+              data: _tabs[i],
+              selected: _selectedTab == _tabs[i].tab,
+              onTap: () {
+                if (_selectedTab == _tabs[i].tab) return;
 
-        const spacing = 12.0;
-        final cardWidth =
-            (constraints.maxWidth - spacing * (columns - 1)) / columns;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            for (int i = 0; i < _categories.length; i++)
-              SizedBox(
-                width: cardWidth,
-                child: _CategoryCard(
-                  category: _categories[i],
-                  selected: _selectedCategory == i,
-                  compact: !isDesktop,
-                  onTap: () {
-                    setState(() {
-                      _selectedCategory = _selectedCategory == i ? -1 : i;
-                    });
-                  },
-                ),
-              ),
+                setState(() {
+                  _selectedTab = _tabs[i].tab;
+                });
+              },
+            ),
           ],
-        );
-      },
+        ],
+      ),
     );
   }
 
-  Widget _buildSongsHeader(BuildContext context, bool isDesktop) {
+  Widget _buildSectionHeader(BuildContext context, bool isDesktop) {
     final theme = Theme.of(context);
 
     return Row(
@@ -234,14 +273,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Todas las canciones',
+                _sectionTitle,
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                '${_songs.length} canciones en tu colección',
+                _sectionSubtitle,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -249,7 +288,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ],
           ),
         ),
-        if (isDesktop)
+        if (isDesktop &&
+            (_selectedTab == _LibraryTab.songs ||
+                _selectedTab == _LibraryTab.favorites))
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -267,7 +308,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  'Biblioteca completa',
+                  _selectedTab == _LibraryTab.songs
+                      ? 'Biblioteca completa'
+                      : 'Tus favoritos',
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: AppTheme.textSecondary,
                   ),
@@ -279,8 +322,59 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  Widget _buildContent(bool isDesktop) {
+    switch (_selectedTab) {
+      case _LibraryTab.songs:
+      case _LibraryTab.favorites:
+        if (_visibleSongs.isEmpty) {
+          return _EmptyLibraryState(
+            icon: _selectedTab == _LibraryTab.favorites
+                ? Icons.favorite_border_rounded
+                : Icons.music_off_rounded,
+            title: _selectedTab == _LibraryTab.favorites
+                ? 'Todavía no tienes favoritos'
+                : 'Tu biblioteca está vacía',
+            message: _selectedTab == _LibraryTab.favorites
+                ? 'Las canciones que marques como favoritas aparecerán aquí.'
+                : 'Cuando tengas canciones disponibles, aparecerán aquí.',
+          );
+        }
+
+        return _buildSongList(isDesktop);
+
+      case _LibraryTab.podcasts:
+        return const _EmptyLibraryState(
+          icon: Icons.podcasts_rounded,
+          title: 'Todavía no hay podcasts',
+          message: 'Tus programas y episodios aparecerán aquí.',
+        );
+
+      case _LibraryTab.playlists:
+        return const _EmptyLibraryState(
+          icon: Icons.queue_music_rounded,
+          title: 'Todavía no hay playlists',
+          message: 'Tus listas de reproducción aparecerán aquí.',
+        );
+
+      case _LibraryTab.artists:
+        return const _EmptyLibraryState(
+          icon: Icons.person_outline_rounded,
+          title: 'Todavía no hay artistas',
+          message: 'Los artistas de tu colección aparecerán aquí.',
+        );
+
+      case _LibraryTab.albums:
+        return const _EmptyLibraryState(
+          icon: Icons.album_rounded,
+          title: 'Todavía no hay álbumes',
+          message: 'Los álbumes de tu colección aparecerán aquí.',
+        );
+    }
+  }
+
   Widget _buildSongList(bool isDesktop) {
     return Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(18),
@@ -288,38 +382,41 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
       child: Column(
         children: [
-          for (int i = 0; i < _songs.length; i++)
-            SongListTile(song: _songs[i], isDesktop: isDesktop),
+          for (final song in _visibleSongs)
+            SongListTile(
+              key: ValueKey(
+                '${song.title}_${song.artist}_${_selectedTab.name}',
+              ),
+              song: song,
+              isDesktop: isDesktop,
+            ),
         ],
       ),
     );
   }
 }
 
-class _LibraryCategory {
+class _LibraryTabData {
+  final _LibraryTab tab;
   final String title;
-  final String subtitle;
   final IconData icon;
-  final Color color;
 
-  const _LibraryCategory({
+  const _LibraryTabData({
+    required this.tab,
     required this.title,
-    required this.subtitle,
     required this.icon,
-    required this.color,
   });
 }
 
-class _CategoryCard extends StatelessWidget {
-  final _LibraryCategory category;
+class _LibraryTabButton extends StatelessWidget {
+  final _LibraryTabData data;
   final bool selected;
-  final bool compact;
   final VoidCallback onTap;
 
-  const _CategoryCard({
-    required this.category,
+  const _LibraryTabButton({
+    super.key,
+    required this.data,
     required this.selected,
-    required this.compact,
     required this.onTap,
   });
 
@@ -329,54 +426,39 @@ class _CategoryCard extends StatelessWidget {
 
     return Material(
       color: selected
-          ? category.color.withValues(alpha: 0.16)
+          ? AppTheme.accent.withValues(alpha: 0.14)
           : AppTheme.surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: EdgeInsets.all(compact ? 14 : 18),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? category.color : AppTheme.surfaceVariant,
+              color: selected ? AppTheme.accent : AppTheme.surfaceVariant,
               width: selected ? 1.2 : 0.7,
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: compact ? 42 : 48,
-                height: compact ? 42 : 48,
-                decoration: BoxDecoration(
-                  color: category.color.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: Icon(
-                  category.icon,
-                  color: category.color,
-                  size: compact ? 22 : 25,
-                ),
+              Icon(
+                data.icon,
+                size: 18,
+                color: selected ? AppTheme.accent : AppTheme.textSecondary,
               ),
-              SizedBox(height: compact ? 12 : 16),
+              const SizedBox(width: 8),
               Text(
-                category.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                category.subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppTheme.textSecondary,
-                  fontSize: 11,
+                data.title,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: selected
+                      ? AppTheme.accent
+                      : theme.colorScheme.onSurface,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.w500,
                 ),
               ),
             ],
@@ -387,115 +469,62 @@ class _CategoryCard extends StatelessWidget {
   }
 }
 
-class _LibrarySongTile extends StatelessWidget {
-  final Song song;
-  final int index;
-  final bool isDesktop;
+class _EmptyLibraryState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
 
-  const _LibrarySongTile({
-    required this.song,
-    required this.index,
-    required this.isDesktop,
+  const _EmptyLibraryState({
+    required this.icon,
+    required this.title,
+    required this.message,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {},
-        hoverColor: AppTheme.surfaceVariant.withValues(alpha: 0.45),
-        splashColor: AppTheme.accent.withValues(alpha: 0.12),
-        highlightColor: AppTheme.accent.withValues(alpha: 0.08),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: isDesktop ? 20 : 12,
-            vertical: isDesktop ? 12 : 10,
-          ),
-          child: Row(
-            children: [
-              _SongArtwork(song: song, size: isDesktop ? 50 : 46),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      song.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      song.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 42,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    song.duration,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                onPressed: () {},
-                tooltip: 'Más opciones',
-                icon: const Icon(Icons.more_horiz_rounded),
-                color: AppTheme.textSecondary,
-                iconSize: 22,
-                visualDensity: VisualDensity.compact,
-                splashRadius: 20,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SongArtwork extends StatelessWidget {
-  final Song song;
-  final double size;
-
-  const _SongArtwork({required this.song, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(11),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [song.color, Color.lerp(song.color, Colors.black, 0.72)!],
-        ),
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
       ),
-      child: Icon(
-        song.icon,
-        color: Colors.white.withValues(alpha: 0.92),
-        size: size * 0.46,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppTheme.accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Icon(icon, size: 30, color: AppTheme.accent),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppTheme.textSecondary,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
