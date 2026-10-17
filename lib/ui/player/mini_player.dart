@@ -80,25 +80,23 @@ class MiniPlayer extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          _buildAnimatedText(
+                            value: title,
                             style: const TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 14,
                             ),
+                            maxLines: 1,
                           ),
                           if (artist.isNotEmpty) ...[
                             const SizedBox(height: 3),
-                            Text(
-                              artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            _buildAnimatedText(
+                              value: artist,
                               style: TextStyle(
                                 color: AppTheme.textSecondary,
                                 fontSize: 12,
                               ),
+                              maxLines: 1,
                             ),
                           ],
                         ],
@@ -187,158 +185,195 @@ class MiniPlayer extends StatelessWidget {
       color: Colors.transparent,
       elevation: 12,
       borderRadius: BorderRadius.circular(16),
-      child: Container(
-        width: 390,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.surface.withValues(alpha: 0.8)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.22),
-              blurRadius: 22,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            _buildArtwork(112),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+      child: InkWell(
+        onTap: onExpand,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 390,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.surface.withValues(alpha: 0.8)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 22,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildArtwork(112),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildAnimatedText(
+                            value: title,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
                           ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Cerrar reproductor',
-                        onPressed: onClose,
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 28,
-                          minHeight: 28,
+                        IconButton(
+                          tooltip: 'Cerrar reproductor',
+                          onPressed: onClose,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 28,
+                            minHeight: 28,
+                          ),
+                          padding: EdgeInsets.zero,
+                          iconSize: 18,
+                          icon: const Icon(Icons.close_rounded),
                         ),
-                        padding: EdgeInsets.zero,
-                        iconSize: 18,
-                        icon: const Icon(Icons.close_rounded),
+                      ],
+                    ),
+                    if (artist.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      _buildAnimatedText(
+                        value: artist,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                        ),
+                        maxLines: 1,
                       ),
                     ],
-                  ),
-                  if (artist.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        tooltip: 'Anterior',
-                        onPressed: canPlayPrevious ? onPrevious : null,
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          tooltip: 'Anterior',
+                          onPressed: canPlayPrevious ? onPrevious : null,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
+                          ),
+                          padding: EdgeInsets.zero,
+                          iconSize: 21,
+                          icon: const Icon(Icons.skip_previous_rounded),
                         ),
-                        padding: EdgeInsets.zero,
-                        iconSize: 21,
-                        icon: const Icon(Icons.skip_previous_rounded),
-                      ),
-                      const SizedBox(width: 5),
-                      SizedBox(
-                        width: 38,
-                        height: 38,
-                        child: Material(
-                          color: AppTheme.accent,
-                          shape: const CircleBorder(),
-                          child: IconButton(
-                            tooltip: isPlaying ? 'Pausar' : 'Reproducir',
-                            onPressed: onPlayPause,
-                            padding: EdgeInsets.zero,
-                            iconSize: 23,
-                            color: Colors.white,
-                            icon: Icon(
-                              isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
+                        const SizedBox(width: 5),
+                        SizedBox(
+                          width: 38,
+                          height: 38,
+                          child: Material(
+                            color: AppTheme.accent,
+                            shape: const CircleBorder(),
+                            child: IconButton(
+                              tooltip: isPlaying ? 'Pausar' : 'Reproducir',
+                              onPressed: onPlayPause,
+                              padding: EdgeInsets.zero,
+                              iconSize: 23,
+                              color: Colors.white,
+                              icon: Icon(
+                                isPlaying
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 5),
-                      IconButton(
-                        tooltip: 'Siguiente',
-                        onPressed: canPlayNext ? onNext : null,
-                        visualDensity: VisualDensity.compact,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
+                        const SizedBox(width: 5),
+                        IconButton(
+                          tooltip: 'Siguiente',
+                          onPressed: canPlayNext ? onNext : null,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
+                          ),
+                          padding: EdgeInsets.zero,
+                          iconSize: 21,
+                          icon: const Icon(Icons.skip_next_rounded),
                         ),
-                        padding: EdgeInsets.zero,
-                        iconSize: 21,
-                        icon: const Icon(Icons.skip_next_rounded),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Text(
-                        _formatDuration(position),
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 10,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          minHeight: 3,
-                          borderRadius: BorderRadius.circular(4),
-                          backgroundColor: AppTheme.surface,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            AppTheme.accent,
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          _formatDuration(position),
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 10,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _formatDuration(duration),
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 10,
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 3,
+                            borderRadius: BorderRadius.circular(4),
+                            backgroundColor: AppTheme.surface,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              AppTheme.accent,
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 6),
+                        Text(
+                          _formatDuration(duration),
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedText({
+    required String value,
+    required TextStyle style,
+    required int maxLines,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        layoutBuilder: (currentChild, previousChildren) {
+          return Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              ...previousChildren,
+              if (currentChild != null) currentChild,
+            ],
+          );
+        },
+        transitionBuilder: (child, animation) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        child: Text(
+          value,
+          key: ValueKey<String>(value),
+          maxLines: maxLines,
+          overflow: TextOverflow.ellipsis,
+          softWrap: maxLines > 1,
+          style: style,
         ),
       ),
     );
@@ -352,15 +387,42 @@ class MiniPlayer extends StatelessWidget {
       child: SizedBox(
         width: size,
         height: size,
-        child: path != null && path.isNotEmpty
-            ? Image.file(
-                File(path),
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return _buildArtworkPlaceholder();
-                },
-              )
-            : _buildArtworkPlaceholder(),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 450),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.92, end: 1).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: path != null && path.isNotEmpty
+              ? Image.file(
+                  File(path),
+                  key: ValueKey<String>(path),
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return SizedBox(
+                      key: ValueKey<String>('placeholder-$path'),
+                      width: size,
+                      height: size,
+                      child: _buildArtworkPlaceholder(),
+                    );
+                  },
+                )
+              : SizedBox(
+                  key: const ValueKey<String>('placeholder'),
+                  width: size,
+                  height: size,
+                  child: _buildArtworkPlaceholder(),
+                ),
+        ),
       ),
     );
   }

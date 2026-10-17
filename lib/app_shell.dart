@@ -5,6 +5,7 @@ import 'ui/app_theme.dart';
 import 'ui/home/home_screen.dart';
 import 'ui/library/library_screen.dart';
 import 'ui/player/mini_player.dart';
+import 'ui/player/player_screen.dart';
 import 'ui/search/search_screen.dart';
 import 'ui/settings/settings_screen.dart';
 import 'core/services/playback_service.dart';
@@ -20,6 +21,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
   bool _sidebarExpanded = true;
+  bool _desktopPlayerExpanded = false;
 
   final GlobalKey<LibraryScreenState> _libraryKey =
       GlobalKey<LibraryScreenState>();
@@ -34,6 +36,10 @@ class _AppShellState extends State<AppShell> {
   static const Duration _sidebarAnimationDuration = Duration(milliseconds: 250);
 
   static const Duration _pageAnimationDuration = Duration(milliseconds: 350);
+
+  static const Duration _miniPlayerEnterDuration = Duration(milliseconds: 320);
+
+  static const Duration _miniPlayerExitDuration = Duration(milliseconds: 260);
 
   static const List<String> _titles = [
     'Inicio',
@@ -68,6 +74,97 @@ class _AppShellState extends State<AppShell> {
 
   bool _isDesktop(BuildContext context) {
     return MediaQuery.sizeOf(context).width >= 700;
+  }
+
+  Future<void> _openPlayerScreen() async {
+    if (!mounted) return;
+
+    final isDesktop = _isDesktop(context);
+
+    if (isDesktop) {
+      setState(() {
+        _desktopPlayerExpanded = true;
+      });
+
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: MaterialLocalizations.of(
+          context,
+        ).modalBarrierDismissLabel,
+        barrierColor: Colors.black54,
+        transitionDuration: const Duration(milliseconds: 320),
+        pageBuilder: (dialogContext, animation, secondaryAnimation) {
+          final screenSize = MediaQuery.sizeOf(dialogContext);
+          final panelWidth = screenSize.width > 932
+              ? 900.0
+              : screenSize.width - 32;
+
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: panelWidth,
+                height: screenSize.height * 0.94,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceVariant,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(24),
+                  ),
+                ),
+                child: const PlayerScreen(),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, secondaryAnimation, child) {
+          final curvedAnimation = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+
+          return FadeTransition(
+            opacity: curvedAnimation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 1),
+                end: Offset.zero,
+              ).animate(curvedAnimation),
+              child: child,
+            ),
+          );
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _desktopPlayerExpanded = false;
+        });
+      }
+
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceVariant,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      builder: (context) {
+        return SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.94,
+          child: const PlayerScreen(),
+        );
+      },
+    );
   }
 
   void _selectPage(int index) {
@@ -172,27 +269,52 @@ class _AppShellState extends State<AppShell> {
         final playback = PlaybackService.instance;
         final song = playback.currentSong;
 
-        if (song == null) {
-          return const SizedBox.shrink();
-        }
+        return AnimatedSwitcher(
+          duration: _miniPlayerEnterDuration,
+          reverseDuration: _miniPlayerExitDuration,
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            final slideAnimation =
+                Tween<Offset>(
+                  begin: const Offset(0, 0.22),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  ),
+                );
 
-        return MiniPlayer(
-          title: song.title,
-          artist: song.artist,
-          artworkPath: song.artworkPath,
-          position: playback.position,
-          duration: playback.duration,
-          isDesktop: isDesktop,
-          isPlaying: playback.isPlaying,
-          canPlayPrevious: playback.canPlayPrevious,
-          canPlayNext: playback.canPlayNext,
-          onPlayPause: playback.togglePlayPause,
-          onPrevious: playback.playPrevious,
-          onNext: playback.playNext,
-          onClose: () {
-            playback.stop();
-            PlaybackQueue.instance.clear();
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(position: slideAnimation, child: child),
+            );
           },
+          child: song == null || (isDesktop && _desktopPlayerExpanded)
+              ? const SizedBox.shrink(
+                  key: ValueKey<String>('mini-player-hidden'),
+                )
+              : MiniPlayer(
+                  key: const ValueKey<String>('mini-player-visible'),
+                  title: song.title,
+                  artist: song.artist,
+                  artworkPath: song.artworkPath,
+                  position: playback.position,
+                  duration: playback.duration,
+                  isDesktop: isDesktop,
+                  isPlaying: playback.isPlaying,
+                  canPlayPrevious: playback.canPlayPrevious,
+                  canPlayNext: playback.canPlayNext,
+                  onExpand: _openPlayerScreen,
+                  onPlayPause: playback.togglePlayPause,
+                  onPrevious: playback.playPrevious,
+                  onNext: playback.playNext,
+                  onClose: () {
+                    playback.stop();
+                    PlaybackQueue.instance.clear();
+                  },
+                ),
         );
       },
     );

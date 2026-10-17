@@ -1,15 +1,21 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 import 'app_shell.dart';
 import 'ui/app_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   JustAudioMediaKit.ensureInitialized();
+
+  if (Platform.isAndroid) {
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  }
+
   runApp(const DecibeXApp());
 }
 

@@ -10,11 +10,49 @@ import 'playback_queue.dart';
 class PlaybackService extends ChangeNotifier {
   PlaybackService._() {
     _player.playerStateStream.listen((state) {
+      final wasPlaying = _isPlaying;
       _isPlaying = state.playing;
+
+      // Al reanudar, mantenemos el objetivo un instante más para filtrar
+      // valores obsoletos; después la posición vuelve a ser la del reproductor.
+      if (!wasPlaying && _isPlaying && _seekTarget != null) {
+        _seekStartedAt = DateTime.now();
+      }
+
       notifyListeners();
     });
 
     _player.positionStream.listen((value) {
+      final target = _seekTarget;
+
+      if (target != null) {
+        final isCloseToTarget =
+            (value.inMilliseconds - target.inMilliseconds).abs() <= 1000;
+
+        if (_isPlaying) {
+          // Reproduciendo: el flujo vuelve a la normalidad en cuanto llega
+          // un valor cercano al objetivo, o pasado un breve margen.
+          final startedAt = _seekStartedAt;
+          final isRecent =
+              startedAt != null &&
+              DateTime.now().difference(startedAt) <
+                  const Duration(milliseconds: 1500);
+
+          if (isCloseToTarget) {
+            _seekTarget = null;
+          } else if (isRecent) {
+            return;
+          } else {
+            _seekTarget = null;
+          }
+        } else if (!isCloseToTarget) {
+          // En pausa: el objetivo se mantiene y cualquier valor lejano
+          // (p. ej. un 0:00 obsoleto que llega tras el seek) se descarta.
+          // Se limpia al reanudar, al cambiar de canción o al hacer otro seek.
+          return;
+        }
+      }
+
       _position = value;
       notifyListeners();
     });
@@ -30,8 +68,20 @@ class PlaybackService extends ChangeNotifier {
         return;
       }
 
-      _currentSong = _playingSongs[index];
-      _position = Duration.zero;
+      final newSong = _playingSongs[index];
+      final previousSong = _currentSong;
+      final songChanged =
+          previousSong == null || !_sameSong(previousSong, newSong);
+
+      _currentSong = newSong;
+
+      // Solo reiniciamos la posición si realmente cambió la canción.
+      // Antes se reiniciaba también al hacer seek, dejando la barra en 0:00.
+      if (songChanged) {
+        _position = Duration.zero;
+        _seekTarget = null;
+      }
+
       notifyListeners();
     });
 
@@ -50,6 +100,10 @@ class PlaybackService extends ChangeNotifier {
   Duration _duration = Duration.zero;
   bool _isPlaying = false;
   bool _isLoading = false;
+
+  // Seek solicitado por el usuario y momento en que se pidió.
+  Duration? _seekTarget;
+  DateTime? _seekStartedAt;
 
   Song? get currentSong => _currentSong;
   Duration get position => _position;
@@ -134,6 +188,8 @@ class PlaybackService extends ChangeNotifier {
     _currentSong = availableSongs.first;
     _position = Duration.zero;
     _duration = Duration.zero;
+    _seekTarget = null;
+    _seekStartedAt = null;
     notifyListeners();
 
     try {
@@ -215,6 +271,8 @@ class PlaybackService extends ChangeNotifier {
         _position = Duration.zero;
         _duration = Duration.zero;
         _isPlaying = false;
+        _seekTarget = null;
+        _seekStartedAt = null;
       } else {
         final currentIndex = _player.currentIndex;
 
@@ -263,14 +321,26 @@ class PlaybackService extends ChangeNotifier {
     if (!canPlayPrevious) return;
 
     if (_position > const Duration(seconds: 3)) {
-      await _player.seek(Duration.zero);
+      await seek(Duration.zero);
     } else {
       await _player.seekToPrevious();
     }
   }
 
   Future<void> seek(Duration position) async {
+    // Actualizamos la posición de inmediato para que la barra no salte.
+    _seekTarget = position;
+    _seekStartedAt = DateTime.now();
+    _position = position;
+    notifyListeners();
+
     await _player.seek(position);
+
+    // Si está en pausa, nos aseguramos de conservar la posición elegida.
+    if (!_isPlaying) {
+      _position = position;
+      notifyListeners();
+    }
   }
 
   Future<void> stop() async {
@@ -282,6 +352,8 @@ class PlaybackService extends ChangeNotifier {
     _duration = Duration.zero;
     _isPlaying = false;
     _isLoading = false;
+    _seekTarget = null;
+    _seekStartedAt = null;
 
     notifyListeners();
   }
