@@ -34,22 +34,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _storagePath;
   String? _storageError;
 
-  // Apariencia.
   bool _darkTheme = AppTheme.defaultDarkTheme;
   int _accentColorValue = 0xFF6750A4;
 
-  // Audio.
   bool _replayGainEnabled = false;
-  double _replayGainPreamp = 0.0;
+  double _replayGainPreamp = 0;
 
   bool _fadeInEnabled = false;
   bool _fadeOutEnabled = false;
-  double _fadeInDuration = 2.0;
-  double _fadeOutDuration = 2.0;
+  double _fadeInDuration = 2;
+  double _fadeOutDuration = 2;
 
-  // Biblioteca.
   bool _scanSubdirectories = true;
   List<String> _scanDirectories = [];
+
+  bool _artistsGridMode = false;
+  bool _albumsGridMode = false;
 
   Color get _accentColor => Color(_accentColorValue);
 
@@ -84,7 +84,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     try {
       final file = await _getSettingsFile();
-
       _storagePath = file.path;
 
       if (await file.exists()) {
@@ -102,7 +101,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _storageError = error.toString();
     }
 
-    // Aplica la apariencia guardada a toda la aplicación.
     AppTheme.updateAppearance(darkTheme: _darkTheme, accentColor: _accentColor);
 
     if (!mounted) return;
@@ -158,6 +156,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? json['scanSubdirectories'] as bool
         : _scanSubdirectories;
 
+    _artistsGridMode = json['artistsGridMode'] is bool
+        ? json['artistsGridMode'] as bool
+        : false;
+
+    _albumsGridMode = json['albumsGridMode'] is bool
+        ? json['albumsGridMode'] as bool
+        : false;
+
     final directories = json['scanDirectories'];
 
     if (directories is List) {
@@ -188,10 +194,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'fadeOutDuration': _fadeOutDuration,
       'scanSubdirectories': _scanSubdirectories,
       'scanDirectories': _scanDirectories,
+      'artistsGridMode': _artistsGridMode,
+      'albumsGridMode': _albumsGridMode,
     };
   }
 
-  /// Guarda los ajustes sin perder cambios que ocurran durante otra escritura.
   Future<void> _saveSettings({bool showError = true}) async {
     if (_isSaving) {
       _saveAgain = true;
@@ -205,7 +212,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _saveAgain = false;
 
         final file = await _getSettingsFile();
-
         final json = const JsonEncoder.withIndent(
           '  ',
         ).convert(_serializeSettings());
@@ -232,13 +238,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  /// Actualiza un ajuste que no modifica la apariencia global.
   Future<void> _updateSetting(VoidCallback update) async {
     setState(update);
     await _saveSettings();
   }
 
-  /// Actualiza el tema y el color de acento en toda la aplicación.
   Future<void> _updateAppearance(VoidCallback update) async {
     setState(update);
 
@@ -322,6 +326,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       _scanSubdirectories = true;
       _scanDirectories = [];
+
+      _artistsGridMode = false;
+      _albumsGridMode = false;
     });
 
     AppTheme.updateAppearance(darkTheme: _darkTheme, accentColor: _accentColor);
@@ -357,7 +364,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   _buildHeader(theme, isDesktop),
                   const SizedBox(height: 30),
-
                   _buildSectionTitle(
                     icon: Icons.palette_outlined,
                     title: 'Apariencia',
@@ -365,7 +371,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 14),
                   _buildAppearanceCard(),
-
                   const SizedBox(height: 30),
                   _buildSectionTitle(
                     icon: Icons.graphic_eq_rounded,
@@ -374,7 +379,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 14),
                   _buildAudioCard(),
-
                   const SizedBox(height: 30),
                   _buildSectionTitle(
                     icon: Icons.folder_open_rounded,
@@ -383,7 +387,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 14),
                   _buildLibraryCard(),
-
                   const SizedBox(height: 30),
                   _buildSectionTitle(
                     icon: Icons.info_outline_rounded,
@@ -392,7 +395,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 14),
                   _buildAboutCard(),
-
                   const SizedBox(height: 24),
                   Center(
                     child: TextButton.icon(
@@ -722,7 +724,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Padding(
           padding: const EdgeInsets.all(18),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const Expanded(
                 child: _SettingHeading(

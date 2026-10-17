@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'ui/app_theme.dart';
@@ -17,10 +18,19 @@ class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
   bool _sidebarExpanded = true;
 
+  final GlobalKey<LibraryScreenState> _libraryKey =
+      GlobalKey<LibraryScreenState>();
+
+  late final PageController _pageController = PageController(
+    initialPage: _selectedIndex,
+  );
+
   static const double _expandedWidth = 240;
   static const double _collapsedWidth = 72;
 
   static const Duration _sidebarAnimationDuration = Duration(milliseconds: 250);
+
+  static const Duration _pageAnimationDuration = Duration(milliseconds: 350);
 
   static const List<String> _titles = [
     'Inicio',
@@ -43,47 +53,99 @@ class _AppShellState extends State<AppShell> {
     Icons.settings_rounded,
   ];
 
-  static const List<Widget> _screens = [
-    HomeScreen(),
-    LibraryScreen(),
-    SearchScreen(),
-    SettingsScreen(),
+  late final List<Widget> _screens = [
+    const HomeScreen(),
+    LibraryScreen(key: _libraryKey),
+    const SearchScreen(),
+    const SettingsScreen(),
   ];
+
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool _isDesktop(BuildContext context) {
     return MediaQuery.sizeOf(context).width >= 700;
   }
 
   void _selectPage(int index) {
+    if (_selectedIndex == index) return;
+
     setState(() {
       _selectedIndex = index;
     });
+
+    if (_isAndroid) {
+      _pageController.animateToPage(
+        index,
+        duration: _pageAnimationDuration,
+        curve: Curves.easeInOutCubic,
+      );
+    } else {
+      _pageController.jumpToPage(index);
+    }
+  }
+
+  void _handleBack() {
+    if (_selectedIndex == 1) {
+      final libraryState = _libraryKey.currentState;
+
+      if (libraryState != null && libraryState.hasOpenDetail) {
+        libraryState.handleSystemBack();
+        return;
+      }
+    }
+
+    if (_selectedIndex != 0) {
+      _selectPage(0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final isDesktop = _isDesktop(context);
 
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildTitleBar(context),
-            Expanded(
-              child: Row(
-                children: [
-                  if (isDesktop) _buildSidebar(),
-                  Expanded(
-                    child: IndexedStack(
-                      index: _selectedIndex,
-                      children: _screens,
+    return PopScope<Object?>(
+      canPop: _selectedIndex == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _handleBack();
+        }
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildTitleBar(context),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (isDesktop) _buildSidebar(),
+                    Expanded(
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        onPageChanged: (index) {
+                          if (_selectedIndex != index) {
+                            setState(() {
+                              _selectedIndex = index;
+                            });
+                          }
+                        },
+                        children: _screens,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (!isDesktop) _buildBottomNavigation(),
-          ],
+              if (!isDesktop) _buildBottomNavigation(),
+            ],
+          ),
         ),
       ),
     );
@@ -110,7 +172,7 @@ class _AppShellState extends State<AppShell> {
           Container(
             height: 24,
             width: 1,
-            margin: const EdgeInsets.symmetric(horizontal: 18),
+            margin: const EdgeInsets.symmetric(horizontal: 10),
             color: AppTheme.surfaceVariant,
           ),
           Expanded(
