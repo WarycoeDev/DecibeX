@@ -122,32 +122,42 @@ class _AppShellState extends State<AppShell> {
       },
       child: Scaffold(
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              _buildTitleBar(context),
-              Expanded(
-                child: Row(
-                  children: [
-                    if (isDesktop) _buildSidebar(),
-                    Expanded(
-                      child: PageView(
-                        controller: _pageController,
-                        physics: const NeverScrollableScrollPhysics(),
-                        onPageChanged: (index) {
-                          if (_selectedIndex != index) {
-                            setState(() {
-                              _selectedIndex = index;
-                            });
-                          }
-                        },
-                        children: _screens,
-                      ),
+              Column(
+                children: [
+                  _buildTitleBar(context),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (isDesktop) _buildSidebar(),
+                        Expanded(
+                          child: PageView(
+                            controller: _pageController,
+                            physics: const NeverScrollableScrollPhysics(),
+                            onPageChanged: (index) {
+                              if (_selectedIndex != index) {
+                                setState(() {
+                                  _selectedIndex = index;
+                                });
+                              }
+                            },
+                            children: _screens,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  if (!isDesktop) _buildMiniPlayer(false),
+                  if (!isDesktop) _buildBottomNavigation(),
+                ],
               ),
-              _buildMiniPlayer(isDesktop),
-              if (!isDesktop) _buildBottomNavigation(),
+              if (isDesktop)
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: _buildMiniPlayer(true),
+                ),
             ],
           ),
         ),
@@ -174,6 +184,8 @@ class _AppShellState extends State<AppShell> {
           duration: playback.duration,
           isDesktop: isDesktop,
           isPlaying: playback.isPlaying,
+          canPlayPrevious: playback.canPlayPrevious,
+          canPlayNext: playback.canPlayNext,
           onPlayPause: playback.togglePlayPause,
           onPrevious: playback.playPrevious,
           onNext: playback.playNext,

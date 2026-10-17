@@ -26,6 +26,7 @@ class PlaybackService extends ChangeNotifier {
 
     _player.currentIndexStream.listen((index) {
       if (index == null || index < 0 || index >= _playingSongs.length) {
+        notifyListeners();
         return;
       }
 
@@ -55,6 +56,36 @@ class PlaybackService extends ChangeNotifier {
   Duration get duration => _duration;
   bool get isPlaying => _isPlaying;
   bool get isLoading => _isLoading;
+
+  int? get currentIndex => _player.currentIndex;
+
+  bool get canPlayPrevious {
+    if (_isLoading || _playingSongs.isEmpty || _currentSong == null) {
+      return false;
+    }
+
+    final index = _player.currentIndex;
+
+    if (index == null || index < 0 || index >= _playingSongs.length) {
+      return false;
+    }
+
+    return _position > const Duration(seconds: 3) || index > 0;
+  }
+
+  bool get canPlayNext {
+    if (_isLoading || _playingSongs.isEmpty || _currentSong == null) {
+      return false;
+    }
+
+    final index = _player.currentIndex;
+
+    if (index == null || index < 0 || index >= _playingSongs.length) {
+      return false;
+    }
+
+    return index < _playingSongs.length - 1;
+  }
 
   bool _sameSong(Song a, Song b) {
     final pathA = a.filePath?.trim();
@@ -223,10 +254,14 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> playNext() async {
+    if (!canPlayNext) return;
+
     await _player.seekToNext();
   }
 
   Future<void> playPrevious() async {
+    if (!canPlayPrevious) return;
+
     if (_position > const Duration(seconds: 3)) {
       await _player.seek(Duration.zero);
     } else {
@@ -246,6 +281,7 @@ class PlaybackService extends ChangeNotifier {
     _position = Duration.zero;
     _duration = Duration.zero;
     _isPlaying = false;
+    _isLoading = false;
 
     notifyListeners();
   }

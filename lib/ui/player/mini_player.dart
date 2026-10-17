@@ -12,6 +12,8 @@ class MiniPlayer extends StatelessWidget {
   final Duration duration;
   final bool isPlaying;
   final bool isDesktop;
+  final bool canPlayPrevious;
+  final bool canPlayNext;
   final VoidCallback? onClose;
   final VoidCallback? onExpand;
   final VoidCallback? onPlayPause;
@@ -27,6 +29,8 @@ class MiniPlayer extends StatelessWidget {
     this.duration = Duration.zero,
     this.isPlaying = false,
     this.isDesktop = false,
+    this.canPlayPrevious = false,
+    this.canPlayNext = false,
     this.onClose,
     this.onExpand,
     this.onPlayPause,
@@ -34,52 +38,42 @@ class MiniPlayer extends StatelessWidget {
     this.onNext,
   });
 
-  String _formatDuration(Duration value) {
-    final minutes = value.inMinutes;
-    final seconds = value.inSeconds.remainder(60);
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final totalMilliseconds = duration.inMilliseconds;
-    final currentMilliseconds = position.inMilliseconds.clamp(
-      0,
-      totalMilliseconds > 0 ? totalMilliseconds : 0,
-    );
+    if (isDesktop) {
+      return _buildDesktopPlayer(context);
+    }
 
-    final progress = totalMilliseconds > 0
-        ? currentMilliseconds / totalMilliseconds
+    return _buildMobilePlayer(context);
+  }
+
+  Widget _buildMobilePlayer(BuildContext context) {
+    final progress = duration.inMilliseconds > 0
+        ? (position.inMilliseconds / duration.inMilliseconds)
+              .clamp(0.0, 1.0)
+              .toDouble()
         : 0.0;
 
     return Material(
       color: Colors.transparent,
       child: Container(
-        margin: EdgeInsets.fromLTRB(
-          isDesktop ? 16 : 12,
-          4,
-          isDesktop ? 16 : 12,
-          8,
-        ),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: AppTheme.textSecondary.withValues(alpha: 0.12),
-          ),
+          border: Border.all(color: AppTheme.surface.withValues(alpha: 0.7)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             InkWell(
-              onTap: onExpand,
               borderRadius: BorderRadius.circular(16),
+              onTap: onExpand,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
                 child: Row(
                   children: [
-                    _MiniPlayerArtwork(artworkPath: artworkPath, size: 48),
+                    _buildArtwork(48),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -90,51 +84,53 @@ class MiniPlayer extends StatelessWidget {
                             title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            artist.isEmpty ? 'Artista desconocido' : artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: AppTheme.textSecondary,
+                          if (artist.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
                     IconButton(
-                      tooltip: 'Canción anterior',
-                      onPressed: onPrevious,
-                      icon: const Icon(Icons.skip_previous_rounded),
+                      tooltip: 'Anterior',
                       visualDensity: VisualDensity.compact,
+                      onPressed: canPlayPrevious ? onPrevious : null,
+                      icon: const Icon(Icons.skip_previous_rounded),
                     ),
                     IconButton(
                       tooltip: isPlaying ? 'Pausar' : 'Reproducir',
+                      visualDensity: VisualDensity.compact,
                       onPressed: onPlayPause,
                       icon: Icon(
                         isPlaying
                             ? Icons.pause_rounded
                             : Icons.play_arrow_rounded,
                       ),
-                      iconSize: 30,
-                      visualDensity: VisualDensity.compact,
                     ),
                     IconButton(
-                      tooltip: 'Siguiente canción',
-                      onPressed: onNext,
-                      icon: const Icon(Icons.skip_next_rounded),
+                      tooltip: 'Siguiente',
                       visualDensity: VisualDensity.compact,
+                      onPressed: canPlayNext ? onNext : null,
+                      icon: const Icon(Icons.skip_next_rounded),
                     ),
                     IconButton(
                       tooltip: 'Cerrar reproductor',
+                      visualDensity: VisualDensity.compact,
                       onPressed: onClose,
                       icon: const Icon(Icons.close_rounded),
-                      iconSize: 20,
-                      visualDensity: VisualDensity.compact,
                     ),
                   ],
                 ),
@@ -142,36 +138,34 @@ class MiniPlayer extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Row(
+              child: Column(
                 children: [
-                  Text(
-                    _formatDuration(position),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: progress,
-                        minHeight: 3,
-                        backgroundColor: AppTheme.textSecondary.withValues(
-                          alpha: 0.2,
-                        ),
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          AppTheme.accent,
+                  Row(
+                    children: [
+                      Text(
+                        _formatDuration(position),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10,
                         ),
                       ),
-                    ),
+                      const Spacer(),
+                      Text(
+                        _formatDuration(duration),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _formatDuration(duration),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 3,
+                    borderRadius: BorderRadius.circular(4),
+                    backgroundColor: AppTheme.surface,
+                    valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
                   ),
                 ],
               ),
@@ -181,52 +175,215 @@ class MiniPlayer extends StatelessWidget {
       ),
     );
   }
-}
 
-class _MiniPlayerArtwork extends StatelessWidget {
-  final String? artworkPath;
-  final double size;
+  Widget _buildDesktopPlayer(BuildContext context) {
+    final progress = duration.inMilliseconds > 0
+        ? (position.inMilliseconds / duration.inMilliseconds)
+              .clamp(0.0, 1.0)
+              .toDouble()
+        : 0.0;
 
-  const _MiniPlayerArtwork({required this.artworkPath, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    if (artworkPath != null && artworkPath!.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.file(
-          File(artworkPath!),
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) => _placeholder(),
+    return Material(
+      color: Colors.transparent,
+      elevation: 12,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 390,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.surface.withValues(alpha: 0.8)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.22),
+              blurRadius: 22,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-      );
-    }
-
-    return _placeholder();
-  }
-
-  Widget _placeholder() {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppTheme.accent,
-            Color.lerp(AppTheme.accent, Colors.black, 0.65)!,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            _buildArtwork(112),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Cerrar reproductor',
+                        onPressed: onClose,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                        padding: EdgeInsets.zero,
+                        iconSize: 18,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  if (artist.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: 'Anterior',
+                        onPressed: canPlayPrevious ? onPrevious : null,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        padding: EdgeInsets.zero,
+                        iconSize: 21,
+                        icon: const Icon(Icons.skip_previous_rounded),
+                      ),
+                      const SizedBox(width: 5),
+                      SizedBox(
+                        width: 38,
+                        height: 38,
+                        child: Material(
+                          color: AppTheme.accent,
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            tooltip: isPlaying ? 'Pausar' : 'Reproducir',
+                            onPressed: onPlayPause,
+                            padding: EdgeInsets.zero,
+                            iconSize: 23,
+                            color: Colors.white,
+                            icon: Icon(
+                              isPlaying
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      IconButton(
+                        tooltip: 'Siguiente',
+                        onPressed: canPlayNext ? onNext : null,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        padding: EdgeInsets.zero,
+                        iconSize: 21,
+                        icon: const Icon(Icons.skip_next_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        _formatDuration(position),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 3,
+                          borderRadius: BorderRadius.circular(4),
+                          backgroundColor: AppTheme.surface,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.accent,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _formatDuration(duration),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-      child: const Icon(
-        Icons.music_note_rounded,
-        color: Colors.white,
-        size: 27,
+    );
+  }
+
+  Widget _buildArtwork(double size) {
+    final path = artworkPath;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(9),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: path != null && path.isNotEmpty
+            ? Image.file(
+                File(path),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return _buildArtworkPlaceholder();
+                },
+              )
+            : _buildArtworkPlaceholder(),
       ),
     );
+  }
+
+  Widget _buildArtworkPlaceholder() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppTheme.accent.withValues(alpha: 0.8), AppTheme.surface],
+        ),
+      ),
+      child: const Center(
+        child: Icon(Icons.music_note_rounded, size: 25, color: Colors.white),
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds.remainder(60);
+
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 }
