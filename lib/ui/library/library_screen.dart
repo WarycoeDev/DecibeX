@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../../core/models/song.dart';
+import '../../core/services/library_scanner.dart';
 import 'song_list_tile.dart';
 
 enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
@@ -15,123 +16,55 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   static const List<_LibraryTabData> _tabs = [
+    _LibraryTabData(_LibraryTab.songs, 'Canciones', Icons.music_note_rounded),
+    _LibraryTabData(_LibraryTab.podcasts, 'Podcasts', Icons.podcasts_rounded),
     _LibraryTabData(
-      tab: _LibraryTab.songs,
-      title: 'Canciones',
-      icon: Icons.music_note_rounded,
+      _LibraryTab.playlists,
+      'Playlists',
+      Icons.queue_music_rounded,
     ),
-    _LibraryTabData(
-      tab: _LibraryTab.podcasts,
-      title: 'Podcasts',
-      icon: Icons.podcasts_rounded,
-    ),
-    _LibraryTabData(
-      tab: _LibraryTab.playlists,
-      title: 'Playlists',
-      icon: Icons.queue_music_rounded,
-    ),
-    _LibraryTabData(
-      tab: _LibraryTab.favorites,
-      title: 'Favoritos',
-      icon: Icons.favorite_rounded,
-    ),
-    _LibraryTabData(
-      tab: _LibraryTab.artists,
-      title: 'Artistas',
-      icon: Icons.person_rounded,
-    ),
-    _LibraryTabData(
-      tab: _LibraryTab.albums,
-      title: 'Álbumes',
-      icon: Icons.album_rounded,
-    ),
+    _LibraryTabData(_LibraryTab.favorites, 'Favoritos', Icons.favorite_rounded),
+    _LibraryTabData(_LibraryTab.artists, 'Artistas', Icons.person_rounded),
+    _LibraryTabData(_LibraryTab.albums, 'Álbumes', Icons.album_rounded),
   ];
 
-  static const List<Song> _songs = [
-    Song(
-      title: 'Midnight City',
-      artist: 'M83',
-      album: 'Hurry Up, We’re Dreaming',
-      duration: '4:03',
-      icon: Icons.nightlight_round,
-      color: Color(0xFF6750A4),
-    ),
-    Song(
-      title: 'After Dark',
-      artist: 'Mr.Kitty',
-      album: 'Time',
-      duration: '4:17',
-      icon: Icons.dark_mode_rounded,
-      color: Color(0xFF344B70),
-      favorite: true,
-    ),
-    Song(
-      title: 'Resonance',
-      artist: 'HOME',
-      album: 'Odyssey',
-      duration: '3:32',
-      icon: Icons.waves_rounded,
-      color: Color(0xFF357F91),
-      favorite: true,
-    ),
-    Song(
-      title: 'Memory Reboot',
-      artist: 'VØJ, Narvent',
-      album: 'Memory Reboot',
-      duration: '3:00',
-      icon: Icons.blur_on_rounded,
-      color: Color(0xFF8C476C),
-    ),
-    Song(
-      title: 'Snowfall',
-      artist: 'Øneheart',
-      album: 'Snowfall',
-      duration: '2:03',
-      icon: Icons.ac_unit_rounded,
-      color: Color(0xFF526B99),
-      favorite: true,
-    ),
-    Song(
-      title: 'Space Song',
-      artist: 'Beach House',
-      album: 'Depression Cherry',
-      duration: '5:20',
-      icon: Icons.nights_stay_rounded,
-      color: Color(0xFF53668E),
-    ),
-    Song(
-      title: 'The Less I Know the Better',
-      artist: 'Tame Impala',
-      album: 'Currents',
-      duration: '3:36',
-      icon: Icons.graphic_eq_rounded,
-      color: Color(0xFF9A654E),
-    ),
-    Song(
-      title: 'A Real Hero',
-      artist: 'College, Electric Youth',
-      album: 'Drive',
-      duration: '4:27',
-      icon: Icons.directions_car_rounded,
-      color: Color(0xFF426D7C),
-    ),
-  ];
+  final LibraryScanner _scanner = LibraryScanner.instance;
 
   _LibraryTab _selectedTab = _LibraryTab.songs;
 
-  List<Song> get _visibleSongs {
+  @override
+  void initState() {
+    super.initState();
+    _scanner.initialize();
+  }
+
+  List<Song> _getVisibleSongs() {
+    final songs = _scanner.songs;
+
     switch (_selectedTab) {
       case _LibraryTab.songs:
-        return _songs;
-
+        return songs;
       case _LibraryTab.favorites:
-        return _songs.where((song) => song.favorite).toList();
+        return songs.where((song) => song.favorite).toList();
+      case _LibraryTab.artists:
+        final unique = <String, Song>{};
 
+        for (final song in songs) {
+          unique.putIfAbsent(song.artist, () => song);
+        }
+
+        return unique.values.toList();
+      case _LibraryTab.albums:
+        final unique = <String, Song>{};
+
+        for (final song in songs) {
+          unique.putIfAbsent('${song.artist}_${song.album}', () => song);
+        }
+
+        return unique.values.toList();
       case _LibraryTab.podcasts:
       case _LibraryTab.playlists:
-      case _LibraryTab.artists:
-      case _LibraryTab.albums:
-        return const [];
+        return [];
     }
   }
 
@@ -152,53 +85,92 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  String get _sectionSubtitle {
+  String _sectionSubtitle(List<Song> songs) {
     switch (_selectedTab) {
       case _LibraryTab.songs:
-        return '${_visibleSongs.length} canciones en tu colección';
+        return '${_scanner.songCount} canciones en tu colección';
       case _LibraryTab.podcasts:
         return 'Tus programas y episodios';
       case _LibraryTab.playlists:
         return 'Tus listas de reproducción';
       case _LibraryTab.favorites:
-        return '${_visibleSongs.length} canciones favoritas';
+        return '${songs.length} canciones favoritas';
       case _LibraryTab.artists:
-        return 'Artistas de tu colección';
+        return '${songs.length} artistas en tu colección';
       case _LibraryTab.albums:
-        return 'Álbumes de tu colección';
+        return '${songs.length} álbumes en tu colección';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth >= 800;
+    return AnimatedBuilder(
+      animation: _scanner,
+      builder: (context, child) {
+        final songs = _getVisibleSongs();
 
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            isDesktop ? 36 : 20,
-            isDesktop ? 32 : 24,
-            isDesktop ? 36 : 20,
-            36,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1440),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(context, isDesktop),
-                  SizedBox(height: isDesktop ? 32 : 24),
-                  _buildTabs(),
-                  SizedBox(height: isDesktop ? 36 : 28),
-                  _buildSectionHeader(context, isDesktop),
-                  const SizedBox(height: 16),
-                  _buildContent(isDesktop),
-                ],
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isDesktop = constraints.maxWidth >= 800;
+
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: CustomScrollView(
+                  cacheExtent: 600,
+                  slivers: [
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        isDesktop ? 36 : 20,
+                        isDesktop ? 32 : 24,
+                        isDesktop ? 36 : 20,
+                        0,
+                      ),
+                      sliver: SliverToBoxAdapter(
+                        child: _buildHeader(context, isDesktop),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: EdgeInsets.only(top: isDesktop ? 32 : 24),
+                      sliver: SliverToBoxAdapter(child: _buildTabs()),
+                    ),
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        isDesktop ? 36 : 20,
+                        isDesktop ? 36 : 28,
+                        isDesktop ? 36 : 20,
+                        0,
+                      ),
+                      sliver: SliverToBoxAdapter(
+                        child: _buildSectionHeader(context, songs),
+                      ),
+                    ),
+                    if (_scanner.isScanning)
+                      const SliverPadding(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        sliver: SliverToBoxAdapter(
+                          child: LinearProgressIndicator(),
+                        ),
+                      ),
+                    if (_scanner.error != null)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                        sliver: SliverToBoxAdapter(child: _buildError()),
+                      ),
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        isDesktop ? 36 : 20,
+                        16,
+                        isDesktop ? 36 : 20,
+                        36,
+                      ),
+                      sliver: _buildContent(songs, isDesktop),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -234,8 +206,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
             color: AppTheme.textSecondary,
           ),
         ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              _scanner.lastScan == null
+                  ? 'Escaneo pendiente'
+                  : 'Último escaneo: ${_formatLastScan(_scanner.lastScan!)}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: _scanner.isScanning ? null : _scanner.scan,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Escanear ahora'),
+            ),
+          ],
+        ),
       ],
     );
+  }
+
+  String _formatLastScan(DateTime date) {
+    final local = date.toLocal();
+    final datePart =
+        '${local.day.toString().padLeft(2, '0')}/'
+        '${local.month.toString().padLeft(2, '0')}/'
+        '${local.year}';
+    final timePart =
+        '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+
+    return '$datePart $timePart';
   }
 
   Widget _buildTabs() {
@@ -249,8 +255,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
               data: _tabs[i],
               selected: _selectedTab == _tabs[i].tab,
               onTap: () {
-                if (_selectedTab == _tabs[i].tab) return;
-
                 setState(() {
                   _selectedTab = _tabs[i].tab;
                 });
@@ -262,11 +266,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, bool isDesktop) {
+  Widget _buildSectionHeader(BuildContext context, List<Song> songs) {
     final theme = Theme.of(context);
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
           child: Column(
@@ -280,7 +283,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                _sectionSubtitle,
+                _sectionSubtitle(songs),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -288,109 +291,117 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ],
           ),
         ),
-        if (isDesktop &&
-            (_selectedTab == _LibraryTab.songs ||
-                _selectedTab == _LibraryTab.favorites))
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.music_note_rounded,
-                  size: 17,
-                  color: AppTheme.accent,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _selectedTab == _LibraryTab.songs
-                      ? 'Biblioteca completa'
-                      : 'Tus favoritos',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: AppTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }
 
-  Widget _buildContent(bool isDesktop) {
-    switch (_selectedTab) {
-      case _LibraryTab.songs:
-      case _LibraryTab.favorites:
-        if (_visibleSongs.isEmpty) {
-          return _EmptyLibraryState(
-            icon: _selectedTab == _LibraryTab.favorites
-                ? Icons.favorite_border_rounded
-                : Icons.music_off_rounded,
-            title: _selectedTab == _LibraryTab.favorites
-                ? 'Todavía no tienes favoritos'
-                : 'Tu biblioteca está vacía',
-            message: _selectedTab == _LibraryTab.favorites
-                ? 'Las canciones que marques como favoritas aparecerán aquí.'
-                : 'Cuando tengas canciones disponibles, aparecerán aquí.',
-          );
-        }
-
-        return _buildSongList(isDesktop);
-
-      case _LibraryTab.podcasts:
-        return const _EmptyLibraryState(
+  Widget _buildContent(List<Song> songs, bool isDesktop) {
+    if (_selectedTab == _LibraryTab.podcasts) {
+      return const SliverToBoxAdapter(
+        child: _EmptyLibraryState(
           icon: Icons.podcasts_rounded,
           title: 'Todavía no hay podcasts',
           message: 'Tus programas y episodios aparecerán aquí.',
-        );
+        ),
+      );
+    }
 
-      case _LibraryTab.playlists:
-        return const _EmptyLibraryState(
+    if (_selectedTab == _LibraryTab.playlists) {
+      return const SliverToBoxAdapter(
+        child: _EmptyLibraryState(
           icon: Icons.queue_music_rounded,
           title: 'Todavía no hay playlists',
           message: 'Tus listas de reproducción aparecerán aquí.',
-        );
-
-      case _LibraryTab.artists:
-        return const _EmptyLibraryState(
-          icon: Icons.person_outline_rounded,
-          title: 'Todavía no hay artistas',
-          message: 'Los artistas de tu colección aparecerán aquí.',
-        );
-
-      case _LibraryTab.albums:
-        return const _EmptyLibraryState(
-          icon: Icons.album_rounded,
-          title: 'Todavía no hay álbumes',
-          message: 'Los álbumes de tu colección aparecerán aquí.',
-        );
+        ),
+      );
     }
+
+    if (songs.isEmpty) {
+      final favorites = _selectedTab == _LibraryTab.favorites;
+
+      return SliverToBoxAdapter(
+        child: _EmptyLibraryState(
+          icon: favorites
+              ? Icons.favorite_border_rounded
+              : Icons.music_off_rounded,
+          title: favorites
+              ? 'Todavía no tienes favoritos'
+              : 'Tu biblioteca está vacía',
+          message: favorites
+              ? 'Marca canciones como favoritas para verlas aquí.'
+              : 'Agrega directorios en Configuración > Biblioteca y escanea tus archivos.',
+        ),
+      );
+    }
+
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          final song = songs[index];
+          final isFirst = index == 0;
+          final isLast = index == songs.length - 1;
+
+          return RepaintBoundary(
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                border: Border(
+                  left: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
+                  right: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
+                  top: isFirst
+                      ? BorderSide(color: AppTheme.surfaceVariant, width: 0.7)
+                      : BorderSide.none,
+                  bottom: BorderSide(
+                    color: AppTheme.surfaceVariant,
+                    width: 0.7,
+                  ),
+                ),
+                borderRadius: BorderRadius.vertical(
+                  top: isFirst ? const Radius.circular(18) : Radius.zero,
+                  bottom: isLast ? const Radius.circular(18) : Radius.zero,
+                ),
+              ),
+              child: SongListTile(
+                key: ValueKey(song.filePath),
+                song: song,
+                isDesktop: isDesktop,
+                onFavoriteChanged: (favorite) {
+                  _scanner.setFavorite(song, favorite);
+                },
+              ),
+            ),
+          );
+        },
+        childCount: songs.length,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: false,
+      ),
+    );
   }
 
-  Widget _buildSongList(bool isDesktop) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
-      ),
-      child: Column(
-        children: [
-          for (final song in _visibleSongs)
-            SongListTile(
-              key: ValueKey(
-                '${song.title}_${song.artist}_${_selectedTab.name}',
-              ),
-              song: song,
-              isDesktop: isDesktop,
+  Widget _buildError() {
+    return Material(
+      color: Theme.of(context).colorScheme.errorContainer,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              color: Theme.of(context).colorScheme.onErrorContainer,
             ),
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _scanner.error!,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -401,11 +412,7 @@ class _LibraryTabData {
   final String title;
   final IconData icon;
 
-  const _LibraryTabData({
-    required this.tab,
-    required this.title,
-    required this.icon,
-  });
+  const _LibraryTabData(this.tab, this.title, this.icon);
 }
 
 class _LibraryTabButton extends StatelessWidget {
@@ -434,7 +441,6 @@ class _LibraryTabButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),

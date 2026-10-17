@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -7,17 +9,31 @@ class SongListTile extends StatelessWidget {
   final Song song;
   final bool isDesktop;
   final VoidCallback? onMoreOptions;
+  final ValueChanged<bool>? onFavoriteChanged;
 
   const SongListTile({
     super.key,
     required this.song,
     required this.isDesktop,
     this.onMoreOptions,
+    this.onFavoriteChanged,
   });
 
+  /// Nombre del archivo sin extensión. Si no hay ruta, usa el título.
+  String get _displayTitle {
+    final path = song.filePath;
+
+    if (path == null || path.isEmpty) return song.title;
+
+    final name = path.split(RegExp(r'[\\/]')).last;
+    final dot = name.lastIndexOf('.');
+    final baseName = dot <= 0 ? name : name.substring(0, dot);
+
+    return baseName.isEmpty ? song.title : baseName;
+  }
+
   void _onSongTap() {
-    // TODO: Conectar con el reproductor para reproducir esta canción.
-    debugPrint('Canción seleccionada: ${song.title}');
+    debugPrint('Canción seleccionada: ${song.filePath ?? song.title}');
   }
 
   @override
@@ -32,7 +48,6 @@ class SongListTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         hoverColor: AppTheme.surfaceVariant.withValues(alpha: 0.45),
         splashColor: AppTheme.accent.withValues(alpha: 0.12),
-        highlightColor: AppTheme.accent.withValues(alpha: 0.08),
         child: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: isDesktop ? 20 : 12,
@@ -47,7 +62,7 @@ class SongListTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      song.title,
+                      _displayTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -66,7 +81,23 @@ class SongListTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
+              if (onFavoriteChanged != null)
+                IconButton(
+                  tooltip: song.favorite
+                      ? 'Quitar de favoritos'
+                      : 'Agregar a favoritos',
+                  onPressed: () => onFavoriteChanged!(!song.favorite),
+                  icon: Icon(
+                    song.favorite
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                  ),
+                  color: song.favorite
+                      ? AppTheme.accent
+                      : AppTheme.textSecondary,
+                  visualDensity: VisualDensity.compact,
+                ),
               SizedBox(
                 width: 42,
                 child: Align(
@@ -79,7 +110,6 @@ class SongListTile extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
               IconButton(
                 onPressed: onMoreOptions ?? () {},
                 tooltip: 'Más opciones',
@@ -105,6 +135,30 @@ class _SongArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final artworkPath = song.artworkPath;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final cacheSize = (size * pixelRatio).round().clamp(1, 512);
+
+    if (artworkPath != null && artworkPath.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(11),
+        child: Image.file(
+          File(artworkPath),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          cacheWidth: cacheSize,
+          cacheHeight: cacheSize,
+          filterQuality: FilterQuality.low,
+          errorBuilder: (context, error, stackTrace) => _placeholder(),
+        ),
+      );
+    }
+
+    return _placeholder();
+  }
+
+  Widget _placeholder() {
     return Container(
       width: size,
       height: size,
