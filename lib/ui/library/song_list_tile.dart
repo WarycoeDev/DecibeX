@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../../core/models/song.dart';
+import '../../core/services/playback_queue.dart';
 
 class SongListTile extends StatelessWidget {
   final Song song;
@@ -19,7 +20,6 @@ class SongListTile extends StatelessWidget {
     this.onFavoriteChanged,
   });
 
-  /// Nombre del archivo sin extensión. Si no hay ruta, usa el título.
   String get _displayTitle {
     final path = song.filePath;
 
@@ -32,8 +32,83 @@ class SongListTile extends StatelessWidget {
     return baseName.isEmpty ? song.title : baseName;
   }
 
-  void _onSongTap() {
-    debugPrint('Canción seleccionada: ${song.filePath ?? song.title}');
+  Future<void> _onSongTap(BuildContext context) async {
+    final queue = PlaybackQueue.instance;
+
+    if (queue.isEmpty) {
+      queue.add(song);
+      return;
+    }
+
+    final alreadyQueued = queue.contains(song);
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surfaceVariant,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Text(
+                    _displayTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.playlist_remove_rounded),
+                  title: const Text('Sobrescribir cola'),
+                  onTap: () => Navigator.pop(context, 'replace'),
+                ),
+                ListTile(
+                  leading: Icon(
+                    alreadyQueued
+                        ? Icons.remove_circle_outline_rounded
+                        : Icons.playlist_add_rounded,
+                  ),
+                  title: Text(
+                    alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
+                  ),
+                  onTap: () => Navigator.pop(context, 'toggle'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.close_rounded),
+                  title: const Text('Cancelar'),
+                  onTap: () => Navigator.pop(context, 'cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!context.mounted || action == null || action == 'cancel') {
+      return;
+    }
+
+    switch (action) {
+      case 'replace':
+        queue.replace(song);
+        break;
+      case 'toggle':
+        if (queue.contains(song)) {
+          queue.remove(song);
+        } else {
+          queue.add(song);
+        }
+        break;
+    }
   }
 
   @override
@@ -44,7 +119,7 @@ class SongListTile extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: _onSongTap,
+        onTap: () => _onSongTap(context),
         borderRadius: BorderRadius.circular(12),
         hoverColor: AppTheme.surfaceVariant.withValues(alpha: 0.45),
         splashColor: AppTheme.accent.withValues(alpha: 0.12),

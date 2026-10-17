@@ -68,6 +68,14 @@ class LibraryScreenState extends State<LibraryScreen>
       ? _artistsGridMode
       : _selectedTab == _LibraryTab.albums && _albumsGridMode;
 
+  bool _isUnknownAlbum(String album) {
+    final normalized = album.trim().toLowerCase();
+    return normalized.isEmpty ||
+        normalized == 'desconocido' ||
+        normalized == 'unknown' ||
+        normalized == 'unknown album';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -266,7 +274,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
     _navigate(() {
       _openedAlbum = song.album;
-      _openedAlbumArtist = song.artist;
+      _openedAlbumArtist = _isUnknownAlbum(song.album) ? null : song.artist;
       _openedArtist = null;
     }, scrollTo: 0);
   }
@@ -299,12 +307,13 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     if (_selectedTab == _LibraryTab.albums && _openedAlbum != null) {
-      return songs
-          .where(
-            (song) =>
-                song.album == _openedAlbum && song.artist == _openedAlbumArtist,
-          )
-          .toList();
+      return songs.where((song) {
+        if (_isUnknownAlbum(_openedAlbum!)) {
+          return _isUnknownAlbum(song.album);
+        }
+
+        return song.album == _openedAlbum && song.artist == _openedAlbumArtist;
+      }).toList();
     }
 
     switch (_selectedTab) {
@@ -324,7 +333,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final unique = <String, Song>{};
 
         for (final song in songs) {
-          unique.putIfAbsent('${song.artist}\u0000${song.album}', () => song);
+          final key = _isUnknownAlbum(song.album)
+              ? '__unknown_album__'
+              : '${song.artist}\u0000${song.album}';
+
+          unique.putIfAbsent(key, () => song);
         }
 
         return unique.values.toList();
@@ -340,7 +353,7 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     if (_selectedTab == _LibraryTab.albums && _openedAlbum != null) {
-      return _openedAlbum!;
+      return _isUnknownAlbum(_openedAlbum!) ? 'Desconocido' : _openedAlbum!;
     }
 
     switch (_selectedTab) {
@@ -772,8 +785,9 @@ class LibraryScreenState extends State<LibraryScreen>
           final song = songs[index];
           final isFirst = index == 0;
           final isLast = index == songs.length - 1;
-          final title = isArtist ? song.artist : song.album;
-          final subtitle = isArtist ? 'Ver canciones del artista' : song.artist;
+          final title = isArtist
+              ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
+              : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
           final borderRadius = BorderRadius.vertical(
             top: isFirst ? const Radius.circular(18) : Radius.zero,
             bottom: isLast ? const Radius.circular(18) : Radius.zero,
@@ -827,25 +841,12 @@ class LibraryScreenState extends State<LibraryScreen>
                           _buildCollectionArtwork(song, isArtist),
                           const SizedBox(width: 14),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title.isEmpty ? 'Desconocido' : title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w600),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  subtitle.isEmpty ? 'Desconocido' : subtitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: AppTheme.textSecondary),
-                                ),
-                              ],
+                            child: Text(
+                              title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -894,8 +895,9 @@ class LibraryScreenState extends State<LibraryScreen>
           delegate: SliverChildBuilderDelegate(
             (context, index) {
               final song = songs[index];
-              final title = isArtist ? song.artist : song.album;
-              final subtitle = isArtist ? 'Artista' : song.artist;
+              final title = isArtist
+                  ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
+                  : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
 
               return _entry(
                 index,
@@ -934,19 +936,11 @@ class LibraryScreenState extends State<LibraryScreen>
                             ),
                             const SizedBox(height: 10),
                             Text(
-                              title.isEmpty ? 'Desconocido' : title,
+                              title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleSmall
                                   ?.copyWith(fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              subtitle.isEmpty ? 'Desconocido' : subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: AppTheme.textSecondary),
                             ),
                           ],
                         ),
