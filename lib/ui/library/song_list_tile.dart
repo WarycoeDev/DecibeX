@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../../core/models/song.dart';
 import '../../core/services/playback_queue.dart';
+import '../../core/services/playback_service.dart';
 
 class SongListTile extends StatelessWidget {
   final Song song;
@@ -34,9 +35,12 @@ class SongListTile extends StatelessWidget {
 
   Future<void> _onSongTap(BuildContext context) async {
     final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
 
     if (queue.isEmpty) {
-      queue.add(song);
+      if (queue.add(song)) {
+        await playback.playQueue();
+      }
       return;
     }
 
@@ -97,18 +101,146 @@ class SongListTile extends StatelessWidget {
       return;
     }
 
+    await _handleQueueAction(action);
+  }
+
+  Future<void> _handleQueueAction(String action) async {
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
     switch (action) {
       case 'replace':
+        if (queue.isEmpty) return;
+
         queue.replace(song);
+        await playback.playQueue();
         break;
+
       case 'toggle':
         if (queue.contains(song)) {
-          queue.remove(song);
+          if (queue.remove(song)) {
+            await playback.removeFromPlaybackQueue(song);
+          }
         } else {
-          queue.add(song);
+          final queueWasEmpty = queue.isEmpty;
+
+          if (queue.add(song)) {
+            if (queueWasEmpty) {
+              await playback.playQueue();
+              await playback.pause();
+            } else {
+              await playback.appendToPlaybackQueue(song);
+            }
+          }
         }
         break;
     }
+  }
+
+  Future<void> _showContextMenu(BuildContext context) async {
+    final queue = PlaybackQueue.instance;
+    final alreadyQueued = queue.contains(song);
+    final queueIsEmpty = queue.isEmpty;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surfaceVariant,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Row(
+                    children: [
+                      _SongArtwork(song: song, size: 44),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _displayTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(
+                                sheetContext,
+                              ).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(sheetContext).textTheme.bodySmall
+                                  ?.copyWith(color: AppTheme.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!queueIsEmpty)
+                  ListTile(
+                    leading: const Icon(Icons.playlist_remove_rounded),
+                    title: const Text('Sobrescribir cola'),
+                    onTap: () => Navigator.pop(sheetContext, 'replace'),
+                  ),
+                ListTile(
+                  leading: Icon(
+                    alreadyQueued
+                        ? Icons.remove_circle_outline_rounded
+                        : Icons.playlist_add_rounded,
+                  ),
+                  title: Text(
+                    alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'toggle'),
+                ),
+                if (onFavoriteChanged != null)
+                  ListTile(
+                    leading: Icon(
+                      song.favorite
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: song.favorite ? AppTheme.accent : null,
+                    ),
+                    title: Text(
+                      song.favorite
+                          ? 'Quitar de favoritos'
+                          : 'Agregar a favoritos',
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, 'favorite'),
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.close_rounded),
+                  title: const Text('Cancelar'),
+                  onTap: () => Navigator.pop(sheetContext, 'cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!context.mounted || action == null || action == 'cancel') {
+      return;
+    }
+
+    if (action == 'favorite') {
+      onFavoriteChanged?.call(!song.favorite);
+      return;
+    }
+
+    await _handleQueueAction(action);
   }
 
   @override
@@ -120,6 +252,7 @@ class SongListTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: () => _onSongTap(context),
+        onLongPress: () => _showContextMenu(context),
         borderRadius: BorderRadius.circular(12),
         hoverColor: AppTheme.surfaceVariant.withValues(alpha: 0.45),
         splashColor: AppTheme.accent.withValues(alpha: 0.12),
@@ -157,22 +290,6 @@ class SongListTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              if (onFavoriteChanged != null)
-                IconButton(
-                  tooltip: song.favorite
-                      ? 'Quitar de favoritos'
-                      : 'Agregar a favoritos',
-                  onPressed: () => onFavoriteChanged!(!song.favorite),
-                  icon: Icon(
-                    song.favorite
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                  ),
-                  color: song.favorite
-                      ? AppTheme.accent
-                      : AppTheme.textSecondary,
-                  visualDensity: VisualDensity.compact,
-                ),
               SizedBox(
                 width: 42,
                 child: Align(
@@ -186,7 +303,7 @@ class SongListTile extends StatelessWidget {
                 ),
               ),
               IconButton(
-                onPressed: onMoreOptions ?? () {},
+                onPressed: () => _showContextMenu(context),
                 tooltip: 'Más opciones',
                 icon: const Icon(Icons.more_horiz_rounded),
                 color: AppTheme.textSecondary,

@@ -2,12 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 import 'app_shell.dart';
 import 'ui/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  JustAudioMediaKit.ensureInitialized();
   runApp(const DecibeXApp());
 }
 
@@ -55,10 +57,16 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
   }
 
   Future<void> _checkStoragePermission() async {
-    final status = await Permission.manageExternalStorage.status;
+    try {
+      final status = await Permission.manageExternalStorage.status;
 
-    if (!status.isGranted && mounted) {
-      _permissionRequested = false;
+      if (!status.isGranted && mounted) {
+        _permissionRequested = false;
+      }
+    } catch (_) {
+      if (mounted) {
+        _permissionRequested = false;
+      }
     }
   }
 

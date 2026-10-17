@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'ui/app_theme.dart';
 import 'ui/home/home_screen.dart';
 import 'ui/library/library_screen.dart';
+import 'ui/player/mini_player.dart';
 import 'ui/search/search_screen.dart';
 import 'ui/settings/settings_screen.dart';
+import 'core/services/playback_service.dart';
+import 'core/services/playback_queue.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -143,11 +146,43 @@ class _AppShellState extends State<AppShell> {
                   ],
                 ),
               ),
+              _buildMiniPlayer(isDesktop),
               if (!isDesktop) _buildBottomNavigation(),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildMiniPlayer(bool isDesktop) {
+    return AnimatedBuilder(
+      animation: PlaybackService.instance,
+      builder: (context, child) {
+        final playback = PlaybackService.instance;
+        final song = playback.currentSong;
+
+        if (song == null) {
+          return const SizedBox.shrink();
+        }
+
+        return MiniPlayer(
+          title: song.title,
+          artist: song.artist,
+          artworkPath: song.artworkPath,
+          position: playback.position,
+          duration: playback.duration,
+          isDesktop: isDesktop,
+          isPlaying: playback.isPlaying,
+          onPlayPause: playback.togglePlayPause,
+          onPrevious: playback.playPrevious,
+          onNext: playback.playNext,
+          onClose: () {
+            playback.stop();
+            PlaybackQueue.instance.clear();
+          },
+        );
+      },
     );
   }
 

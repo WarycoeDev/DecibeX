@@ -63,7 +63,7 @@ class PlaybackQueue extends ChangeNotifier {
     }
 
     _songs.clear();
-    debugPrint('[PlaybackQueue] Cola vaciada');
+    _logQueue('Cola vaciada');
     notifyListeners();
   }
 
