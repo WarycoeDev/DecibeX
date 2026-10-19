@@ -39,11 +39,11 @@ class LibraryScanner extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _index = {};
   final List<StreamSubscription<FileSystemEvent>> _watchers = [];
-
   final LinkedHashSet<String> _favoritePaths = LinkedHashSet<String>();
 
   List<Song> _songs = [];
   List<String> _directories = [];
+  List<String> _podcastDirectories = [];
 
   Timer? _periodicTimer;
   Timer? _debounceTimer;
@@ -70,7 +70,15 @@ class LibraryScanner extends ChangeNotifier {
 
   List<Song> get songs => UnmodifiableListView<Song>(_songs);
 
-  int get songCount => _songs.length;
+  List<Song> get musicSongs =>
+      UnmodifiableListView(_songs.where((song) => !song.isPodcast));
+
+  List<Song> get podcasts =>
+      UnmodifiableListView(_songs.where((song) => song.isPodcast));
+
+  int get songCount => _songs.where((song) => !song.isPodcast).length;
+
+  int get podcastCount => _songs.where((song) => song.isPodcast).length;
 
   Future<Directory> _settingsDirectory() async {
     if (Platform.isAndroid) {
@@ -137,11 +145,9 @@ class LibraryScanner extends ChangeNotifier {
 
     try {
       await _loadIndex();
-
       if (_disposed) return;
 
       await _loadFavorites();
-
       if (_disposed) return;
 
       if (_legacyFavoritesFound) {
@@ -150,11 +156,9 @@ class LibraryScanner extends ChangeNotifier {
       }
 
       _publishSongs();
-
       if (_disposed) return;
 
       await refreshConfiguration();
-
       if (_disposed) return;
 
       _periodicTimer = Timer.periodic(
@@ -177,7 +181,6 @@ class LibraryScanner extends ChangeNotifier {
 
     try {
       final decoded = jsonDecode(await file.readAsString());
-
       if (_disposed) return;
 
       if (decoded is Map) {
@@ -194,9 +197,13 @@ class LibraryScanner extends ChangeNotifier {
             }
 
             if (entry.containsKey('favorite')) {
-              _legacyFavoritesFound = true;
               entry.remove('favorite');
+              _legacyFavoritesFound = true;
             }
+
+            entry['mediaType'] = entry['mediaType'] == 'podcast'
+                ? 'podcast'
+                : 'music';
 
             _index[path] = entry;
           } catch (_) {}
@@ -211,22 +218,15 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return;
 
     final file = await _favoritesFile();
-
     if (_disposed) return;
 
     if (!await file.exists()) {
       await _saveFavorites();
-
-      if (_legacyFavoritesFound && !_disposed) {
-        await _saveFavorites();
-      }
-
       return;
     }
 
     try {
       final decoded = jsonDecode(await file.readAsString());
-
       if (_disposed) return;
 
       if (decoded is Map) {
@@ -251,7 +251,6 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return;
 
     final cacheDirectory = await _cacheDirectory();
-
     if (_disposed) return;
 
     final file = File('${cacheDirectory.path}/$_indexFileName');
@@ -266,9 +265,7 @@ class LibraryScanner extends ChangeNotifier {
     }
 
     final contents = jsonEncode(cleanIndex);
-
     await temporaryFile.writeAsString(contents, flush: true);
-
     if (_disposed) return;
 
     try {
@@ -289,15 +286,12 @@ class LibraryScanner extends ChangeNotifier {
       if (_disposed) return;
 
       final file = await _favoritesFile();
-
       if (_disposed) return;
 
       final temporaryFile = File('${file.path}.tmp');
-
       final contents = jsonEncode({'favorites': snapshot});
 
       await temporaryFile.writeAsString(contents, flush: true);
-
       if (_disposed) return;
 
       try {
@@ -322,13 +316,11 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return Future<void>.value();
 
     _configurationRefreshRequested = true;
-
     final active = _configurationRefresh;
 
     if (active != null) return active;
 
     final operation = _runConfigurationRefreshQueue();
-
     _configurationRefresh = operation;
 
     return operation.whenComplete(() {
@@ -345,27 +337,39 @@ class LibraryScanner extends ChangeNotifier {
   Future<void> _runConfigurationRefreshQueue() async {
     do {
       _configurationRefreshRequested = false;
-
       if (_disposed) return;
 
       await _readConfigurationOnce();
     } while (_configurationRefreshRequested && !_disposed);
   }
 
+  List<String> _normalizeDirectories(dynamic raw) {
+    if (raw is! List) return [];
+
+    final paths = raw
+        .whereType<String>()
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .map((path) => Directory(path).absolute.path)
+        .toSet()
+        .toList();
+
+    paths.sort();
+    return paths;
+  }
+
   Future<void> _readConfigurationOnce() async {
     try {
       final directory = await _settingsDirectory();
-
       if (_disposed) return;
 
       await _configureSettingsWatcher(directory);
-
       if (_disposed) return;
 
       final file = File('${directory.path}/$_settingsFileName');
 
       if (!await file.exists()) {
-        if (_directories.isNotEmpty) {
+        if (_directories.isNotEmpty || _podcastDirectories.isNotEmpty) {
           error =
               'No se encontró el archivo de configuración. '
               'Se conservará la configuración anterior.';
@@ -381,22 +385,12 @@ class LibraryScanner extends ChangeNotifier {
       }
 
       final decoded = jsonDecode(await file.readAsString());
-
       if (_disposed || decoded is! Map) return;
 
-      final rawDirectories = decoded['scanDirectories'];
-
-      final directories = rawDirectories is List
-          ? rawDirectories
-                .whereType<String>()
-                .map((path) => path.trim())
-                .where((path) => path.isNotEmpty)
-                .map((path) => Directory(path).absolute.path)
-                .toSet()
-                .toList()
-          : <String>[];
-
-      directories.sort();
+      final directories = _normalizeDirectories(decoded['scanDirectories']);
+      final podcastDirectories = _normalizeDirectories(
+        decoded['podcastDirectories'],
+      );
 
       final recursive = decoded['scanSubdirectories'] is bool
           ? decoded['scanSubdirectories'] as bool
@@ -404,15 +398,16 @@ class LibraryScanner extends ChangeNotifier {
 
       final changed =
           !_sameDirectories(_directories, directories) ||
+          !_sameDirectories(_podcastDirectories, podcastDirectories) ||
           _recursive != recursive;
 
       if (changed) {
         _directories = directories;
+        _podcastDirectories = podcastDirectories;
         _recursive = recursive;
         _configurationRevision++;
 
         await _configureWatchers();
-
         if (_disposed) return;
 
         await scan();
@@ -442,11 +437,7 @@ class LibraryScanner extends ChangeNotifier {
   }
 
   Future<void> _configureSettingsWatcher(Directory directory) async {
-    if (_disposed) return;
-
-    final current = _settingsWatcher;
-
-    if (current != null) return;
+    if (_disposed || _settingsWatcher != null) return;
 
     try {
       if (!await directory.exists()) {
@@ -468,7 +459,6 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return;
 
     _settingsDebounceTimer?.cancel();
-
     _settingsDebounceTimer = Timer(const Duration(milliseconds: 200), () {
       if (!_disposed) {
         unawaited(refreshConfiguration());
@@ -491,12 +481,13 @@ class LibraryScanner extends ChangeNotifier {
 
     if (_disposed) return;
 
-    for (final path in _directories) {
+    final allDirectories = <String>{..._directories, ..._podcastDirectories};
+
+    for (final path in allDirectories) {
       if (_disposed) return;
 
       try {
         final directory = Directory(path);
-
         if (!await directory.exists()) continue;
 
         final subscription = directory
@@ -512,7 +503,6 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return;
 
     _debounceTimer?.cancel();
-
     _debounceTimer = Timer(const Duration(milliseconds: 350), () {
       if (!_disposed) {
         unawaited(scan());
@@ -531,9 +521,7 @@ class LibraryScanner extends ChangeNotifier {
     }
 
     _scanRequested = false;
-
     final operation = _runScanQueue();
-
     _activeScan = operation;
 
     return operation.whenComplete(() {
@@ -550,7 +538,6 @@ class LibraryScanner extends ChangeNotifier {
   Future<void> _runScanQueue() async {
     do {
       _scanRequested = false;
-
       if (_disposed) return;
 
       await _performScan();
@@ -565,48 +552,55 @@ class LibraryScanner extends ChangeNotifier {
     _notifyIfAlive();
 
     final scanDirectories = List<String>.from(_directories);
+    final podcastDirectories = List<String>.from(_podcastDirectories);
     final recursive = _recursive;
     final revision = _configurationRevision;
 
     try {
       final files = <String, File>{};
+      final mediaTypes = <String, String>{};
       var enumerationComplete = true;
 
-      for (final path in scanDirectories) {
-        if (_disposed) return;
+      Future<void> enumerate(
+        List<String> directories, {
+        required String mediaType,
+      }) async {
+        for (final path in directories) {
+          if (_disposed) return;
 
-        final directory = Directory(path);
+          final directory = Directory(path);
 
-        try {
-          if (!await directory.exists()) {
-            enumerationComplete = false;
-            continue;
-          }
-
-          await for (final entity in directory.list(
-            recursive: recursive,
-            followLinks: false,
-          )) {
-            if (_disposed) return;
-
-            if (entity is! File) continue;
-
-            if (!_audioExtensions.contains(_extension(entity.path))) {
+          try {
+            if (!await directory.exists()) {
+              enumerationComplete = false;
               continue;
             }
 
-            files[entity.absolute.path] = entity;
+            await for (final entity in directory.list(
+              recursive: recursive,
+              followLinks: false,
+            )) {
+              if (_disposed) return;
+              if (entity is! File) continue;
+              if (!_audioExtensions.contains(_extension(entity.path))) continue;
+
+              final absolutePath = entity.absolute.path;
+              files[absolutePath] = entity;
+              mediaTypes[absolutePath] = mediaType;
+            }
+          } catch (e) {
+            enumerationComplete = false;
+            debugPrint('[LibraryScanner] No se pudo leer "$path": $e');
           }
-        } catch (e) {
-          enumerationComplete = false;
-          debugPrint('[LibraryScanner] No se pudo leer "$path": $e');
         }
       }
+
+      await enumerate(scanDirectories, mediaType: 'music');
+      await enumerate(podcastDirectories, mediaType: 'podcast');
 
       if (_disposed) return;
 
       final cacheDirectory = await _cacheDirectory();
-
       if (_disposed) return;
 
       final fileList = files.values.toList(growable: false);
@@ -619,7 +613,12 @@ class LibraryScanner extends ChangeNotifier {
 
           if (currentIndex >= fileList.length) return;
 
-          await _processFile(fileList[currentIndex], cacheDirectory.path);
+          final file = fileList[currentIndex];
+          await _processFile(
+            file,
+            cacheDirectory.path,
+            mediaType: mediaTypes[file.absolute.path] ?? 'music',
+          );
 
           if (_disposed) return;
 
@@ -636,7 +635,6 @@ class LibraryScanner extends ChangeNotifier {
           : _parallelism;
 
       await Future.wait(List.generate(workerCount, (_) => worker()));
-
       if (_disposed) return;
 
       final configurationUnchanged = revision == _configurationRevision;
@@ -657,7 +655,6 @@ class LibraryScanner extends ChangeNotifier {
           if (artworkPath is String) {
             try {
               final artwork = File(artworkPath);
-
               if (await artwork.exists()) {
                 await artwork.delete();
               }
@@ -667,13 +664,11 @@ class LibraryScanner extends ChangeNotifier {
       } else if (!enumerationComplete) {
         error =
             'El escaneo terminó parcialmente. '
-            'Se conservaron las canciones que no pudieron verificarse.';
+            'Se conservaron los archivos que no pudieron verificarse.';
       }
 
       _publishSongs();
-
       await _saveIndex();
-
       if (_disposed) return;
 
       lastScan = DateTime.now();
@@ -688,14 +683,17 @@ class LibraryScanner extends ChangeNotifier {
     }
   }
 
-  Future<void> _processFile(File file, String cacheDirectoryPath) async {
+  Future<void> _processFile(
+    File file,
+    String cacheDirectoryPath, {
+    required String mediaType,
+  }) async {
     if (_disposed) return;
 
     final path = file.absolute.path;
 
     try {
       final stat = await file.stat();
-
       if (_disposed) return;
 
       final previous = _index[path];
@@ -703,32 +701,27 @@ class LibraryScanner extends ChangeNotifier {
       final unchanged =
           previous != null &&
           previous['modified'] == stat.modified.millisecondsSinceEpoch &&
-          previous['size'] == stat.size;
+          previous['size'] == stat.size &&
+          (previous['mediaType'] == 'podcast' ? 'podcast' : 'music') ==
+              mediaType;
 
       if (unchanged) return;
 
       final metadata = await MediaMetadata.read(path);
-
       if (_disposed) return;
 
       final title =
           _nonEmpty(metadata?.title) ?? _filenameWithoutExtension(path);
-
       final artist = _nonEmpty(metadata?.artist) ?? 'Artista desconocido';
-
       final album = _nonEmpty(metadata?.album) ?? 'Álbum desconocido';
-
       final duration = _formatDuration(metadata?.duration);
 
       String? artworkPath = previous?['artworkPath'] as String?;
-
       final imageData = metadata?.imageMetadata?.data;
 
       if (imageData != null && imageData.isNotEmpty) {
         final imageFile = File('$cacheDirectoryPath/${_stableId(path)}.art');
-
         await imageFile.writeAsBytes(imageData, flush: true);
-
         artworkPath = imageFile.path;
       }
 
@@ -739,24 +732,26 @@ class LibraryScanner extends ChangeNotifier {
         'duration': duration,
         'filePath': path,
         'artworkPath': artworkPath,
+        'mediaType': mediaType,
         'modified': stat.modified.millisecondsSinceEpoch,
         'size': stat.size,
       };
     } catch (e) {
       if (_disposed) return;
 
-      if (!_index.containsKey(path)) {
-        _index[path] = {
-          'title': _filenameWithoutExtension(path),
-          'artist': 'Artista desconocido',
-          'album': 'Álbum desconocido',
-          'duration': '0:00',
-          'filePath': path,
-          'artworkPath': null,
-          'modified': 0,
-          'size': 0,
-        };
-      }
+      final previous = _index[path];
+
+      _index[path] = {
+        'title': previous?['title'] ?? _filenameWithoutExtension(path),
+        'artist': previous?['artist'] ?? 'Artista desconocido',
+        'album': previous?['album'] ?? 'Álbum desconocido',
+        'duration': previous?['duration'] ?? '0:00',
+        'filePath': path,
+        'artworkPath': previous?['artworkPath'],
+        'mediaType': mediaType,
+        'modified': previous?['modified'] ?? 0,
+        'size': previous?['size'] ?? 0,
+      };
 
       debugPrint('[LibraryScanner] No se pudo procesar "$path": $e');
     }
@@ -786,7 +781,6 @@ class LibraryScanner extends ChangeNotifier {
 
     keyed.sort((a, b) {
       final byName = a.key.compareTo(b.key);
-
       if (byName != 0) return byName;
 
       return (a.value.filePath ?? '').compareTo(b.value.filePath ?? '');
@@ -800,11 +794,9 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return;
 
     final path = song.filePath;
-
     if (path == null || !_index.containsKey(path)) return;
 
     final wasFavorite = _favoritePaths.contains(path);
-
     if (wasFavorite == favorite) return;
 
     if (favorite) {
@@ -827,7 +819,6 @@ class LibraryScanner extends ChangeNotifier {
       }
 
       _publishSongs();
-
       error = 'No se pudo guardar el favorito: $e';
       _notifyIfAlive();
     }
@@ -836,27 +827,23 @@ class LibraryScanner extends ChangeNotifier {
   String _extension(String path) {
     final name = path.split(Platform.pathSeparator).last;
     final dot = name.lastIndexOf('.');
-
     return dot < 0 ? '' : name.substring(dot).toLowerCase();
   }
 
   String _filenameWithoutExtension(String path) {
     final name = path.split(Platform.pathSeparator).last;
     final dot = name.lastIndexOf('.');
-
     return dot <= 0 ? name : name.substring(0, dot);
   }
 
   String? _nonEmpty(String? value) {
     if (value == null || value.trim().isEmpty) return null;
-
     return value.trim();
   }
 
   String _sortKey(Song song) {
     final path = song.filePath;
     final name = path == null ? song.title : _filenameWithoutExtension(path);
-
     return _removeAccents(name.trim().toLowerCase());
   }
 
@@ -878,9 +865,7 @@ class LibraryScanner extends ChangeNotifier {
     if (duration == null || duration.isNegative) return '0:00';
 
     final hours = duration.inHours;
-
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
 
     if (hours > 0) {
@@ -910,7 +895,6 @@ class LibraryScanner extends ChangeNotifier {
     _settingsDebounceTimer?.cancel();
 
     final settingsWatcher = _settingsWatcher;
-
     if (settingsWatcher != null) {
       unawaited(settingsWatcher.cancel());
     }
@@ -920,7 +904,6 @@ class LibraryScanner extends ChangeNotifier {
     }
 
     _watchers.clear();
-
     super.dispose();
   }
 }

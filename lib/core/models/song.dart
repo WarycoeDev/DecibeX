@@ -10,6 +10,7 @@ class Song {
   final bool favorite;
   final String? filePath;
   final String? artworkPath;
+  final String mediaType;
 
   const Song({
     required this.title,
@@ -21,19 +22,34 @@ class Song {
     this.favorite = false,
     this.filePath,
     this.artworkPath,
+    this.mediaType = 'music',
   });
 
-  Song copyWith({bool? favorite}) {
+  bool get isPodcast => mediaType == 'podcast';
+
+  Song copyWith({
+    String? title,
+    String? artist,
+    String? album,
+    String? duration,
+    IconData? icon,
+    Color? color,
+    bool? favorite,
+    String? filePath,
+    String? artworkPath,
+    String? mediaType,
+  }) {
     return Song(
-      title: title,
-      artist: artist,
-      album: album,
-      duration: duration,
-      icon: icon,
-      color: color,
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+      duration: duration ?? this.duration,
+      icon: icon ?? this.icon,
+      color: color ?? this.color,
       favorite: favorite ?? this.favorite,
-      filePath: filePath,
-      artworkPath: artworkPath,
+      filePath: filePath ?? this.filePath,
+      artworkPath: artworkPath ?? this.artworkPath,
+      mediaType: mediaType ?? this.mediaType,
     );
   }
 
@@ -46,18 +62,24 @@ class Song {
       'favorite': favorite,
       'filePath': filePath,
       'artworkPath': artworkPath,
+      'mediaType': mediaType,
     };
   }
 
   factory Song.fromJson(Map<String, dynamic> json) {
     return Song(
-      title: json['title'] as String? ?? 'Desconocido',
-      artist: json['artist'] as String? ?? 'Artista desconocido',
-      album: json['album'] as String? ?? 'Álbum desconocido',
-      duration: json['duration'] as String? ?? '0:00',
-      favorite: json['favorite'] as bool? ?? false,
-      filePath: json['filePath'] as String?,
-      artworkPath: json['artworkPath'] as String?,
+      title: json['title'] is String ? json['title'] as String : '',
+      artist: json['artist'] is String ? json['artist'] as String : '',
+      album: json['album'] is String ? json['album'] as String : '',
+      duration: json['duration'] is String
+          ? json['duration'] as String
+          : '0:00',
+      favorite: json['favorite'] is bool ? json['favorite'] as bool : false,
+      filePath: json['filePath'] is String ? json['filePath'] as String : null,
+      artworkPath: json['artworkPath'] is String
+          ? json['artworkPath'] as String
+          : null,
+      mediaType: json['mediaType'] == 'podcast' ? 'podcast' : 'music',
     );
   }
 }

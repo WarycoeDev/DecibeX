@@ -47,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _scanSubdirectories = true;
   List<String> _scanDirectories = [];
+  List<String> _podcastDirectories = [];
 
   bool _artistsGridMode = false;
   bool _albumsGridMode = false;
@@ -169,6 +170,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (directories is List) {
       _scanDirectories = directories.whereType<String>().toSet().toList();
     }
+
+    final podcastDirectories = json['podcastDirectories'];
+
+    if (podcastDirectories is List) {
+      _podcastDirectories = podcastDirectories
+          .whereType<String>()
+          .toSet()
+          .toList();
+    }
   }
 
   double _readDouble(
@@ -194,6 +204,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'fadeOutDuration': _fadeOutDuration,
       'scanSubdirectories': _scanSubdirectories,
       'scanDirectories': _scanDirectories,
+      'podcastDirectories': _podcastDirectories,
       'artistsGridMode': _artistsGridMode,
       'albumsGridMode': _albumsGridMode,
     };
@@ -251,23 +262,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _saveSettings();
   }
 
-  Future<void> _addDirectory() async {
+  Future<void> _addDirectory({required bool podcasts}) async {
     try {
       final selectedDirectory = await FilePicker.getDirectoryPath(
-        dialogTitle: 'Seleccionar directorio de música',
+        dialogTitle: podcasts
+            ? 'Seleccionar directorio de podcasts'
+            : 'Seleccionar directorio de música',
       );
 
       if (selectedDirectory == null || !mounted) return;
 
-      if (_scanDirectories.contains(selectedDirectory)) {
+      final directories = podcasts ? _podcastDirectories : _scanDirectories;
+
+      if (directories.contains(selectedDirectory)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Este directorio ya está agregado.')),
+          SnackBar(
+            content: Text(
+              podcasts
+                  ? 'Este directorio de podcasts ya está agregado.'
+                  : 'Este directorio de música ya está agregado.',
+            ),
+          ),
         );
         return;
       }
 
       setState(() {
-        _scanDirectories.add(selectedDirectory);
+        directories.add(selectedDirectory);
       });
 
       await _saveSettings();
@@ -275,14 +296,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo seleccionar el directorio: $error')),
+        SnackBar(
+          content: Text(
+            podcasts
+                ? 'No se pudo seleccionar el directorio de podcasts: $error'
+                : 'No se pudo seleccionar el directorio de música: $error',
+          ),
+        ),
       );
     }
   }
 
-  Future<void> _removeDirectory(String directory) async {
+  Future<void> _removeDirectory(
+    String directory, {
+    required bool podcasts,
+  }) async {
     setState(() {
-      _scanDirectories.remove(directory);
+      if (podcasts) {
+        _podcastDirectories.remove(directory);
+      } else {
+        _scanDirectories.remove(directory);
+      }
     });
 
     await _saveSettings();
@@ -295,7 +329,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Restablecer configuración'),
         content: const Text(
           'Se restaurarán los valores predeterminados de DecibeX. '
-          'Los directorios agregados también se eliminarán de la lista.',
+          'Los directorios de música y podcasts también se eliminarán de sus listas.',
         ),
         actions: [
           TextButton(
@@ -326,6 +360,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       _scanSubdirectories = true;
       _scanDirectories = [];
+      _podcastDirectories = [];
 
       _artistsGridMode = false;
       _albumsGridMode = false;
@@ -383,7 +418,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildSectionTitle(
                     icon: Icons.folder_open_rounded,
                     title: 'Biblioteca',
-                    subtitle: 'Configura las carpetas que se analizarán.',
+                    subtitle: 'Configura las carpetas de música y podcasts.',
                   ),
                   const SizedBox(height: 14),
                   _buildLibraryCard(),
@@ -721,28 +756,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildLibraryCard() {
     return _buildCard(
       children: [
-        Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              const Expanded(
-                child: _SettingHeading(
-                  icon: Icons.create_new_folder_outlined,
-                  title: 'Directorios de música',
-                  subtitle: 'Carpetas que se incluirán al escanear.',
-                ),
-              ),
-              const SizedBox(width: 12),
-              IconButton.filledTonal(
-                onPressed: _addDirectory,
-                tooltip: 'Agregar directorio',
-                icon: const Icon(Icons.add_rounded),
-                style: IconButton.styleFrom(foregroundColor: _accentColor),
-              ),
-            ],
-          ),
-        ),
-        _buildDivider(),
         _SettingSwitchTile(
           icon: Icons.account_tree_outlined,
           title: 'Incluir subdirectorios',
@@ -755,9 +768,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
             });
           },
         ),
-        if (_scanDirectories.isNotEmpty) ...[
-          _buildDivider(),
-          for (int i = 0; i < _scanDirectories.length; i++) ...[
+        _buildDivider(),
+        _buildDirectorySection(
+          title: 'Directorios de música',
+          subtitle:
+              'Carpetas que se incluirán al escanear la biblioteca musical.',
+          icon: Icons.library_music_outlined,
+          directories: _scanDirectories,
+          podcasts: false,
+        ),
+        _buildDivider(),
+        _buildDirectorySection(
+          title: 'Directorios de podcasts',
+          subtitle:
+              'Carpetas independientes para almacenar y localizar podcasts.',
+          icon: Icons.podcasts_rounded,
+          directories: _podcastDirectories,
+          podcasts: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDirectorySection({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required List<String> directories,
+    required bool podcasts,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 12, 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: _SettingHeading(
+                  icon: icon,
+                  title: title,
+                  subtitle: subtitle,
+                ),
+              ),
+              const SizedBox(width: 12),
+              IconButton.filledTonal(
+                onPressed: () => _addDirectory(podcasts: podcasts),
+                tooltip: podcasts
+                    ? 'Agregar directorio de podcasts'
+                    : 'Agregar directorio de música',
+                icon: const Icon(Icons.add_rounded),
+                style: IconButton.styleFrom(foregroundColor: _accentColor),
+              ),
+            ],
+          ),
+        ),
+        if (directories.isNotEmpty) ...[
+          for (int i = 0; i < directories.length; i++) ...[
             if (i > 0) _buildDivider(),
             ListTile(
               contentPadding: const EdgeInsets.symmetric(
@@ -766,21 +833,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               leading: Icon(Icons.folder_rounded, color: _accentColor),
               title: Text(
-                _scanDirectories[i],
+                directories[i],
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
               trailing: IconButton(
                 tooltip: 'Eliminar directorio',
-                onPressed: () => _removeDirectory(_scanDirectories[i]),
+                onPressed: () =>
+                    _removeDirectory(directories[i], podcasts: podcasts),
                 icon: const Icon(Icons.close_rounded),
               ),
             ),
           ],
-        ] else ...[
-          _buildDivider(),
+        ] else
           Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             child: Center(
               child: Column(
                 children: [
@@ -791,14 +858,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'No hay directorios agregados',
+                    podcasts
+                        ? 'No hay directorios de podcasts'
+                        : 'No hay directorios de música',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    'Agrega una carpeta para configurar tu biblioteca.',
+                    podcasts
+                        ? 'Agrega una carpeta para configurar tus podcasts.'
+                        : 'Agrega una carpeta para configurar tu biblioteca musical.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppTheme.textSecondary,
@@ -808,7 +879,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
-        ],
       ],
     );
   }

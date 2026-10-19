@@ -46,30 +46,37 @@ class LibraryScreenState extends State<LibraryScreen>
   String? _openedArtist;
   String? _openedAlbum;
   String? _openedAlbumArtist;
+  String? _openedPodcast;
 
   double _savedScrollOffset = 0;
   bool _artistsGridMode = false;
   bool _albumsGridMode = false;
+  bool _podcastsGridMode = false;
   bool _viewModesLoaded = false;
   bool _savingViewModes = false;
   bool _saveViewModesAgain = false;
 
   bool get _isDetailView =>
       (_selectedTab == _LibraryTab.artists && _openedArtist != null) ||
-      (_selectedTab == _LibraryTab.albums && _openedAlbum != null);
+      (_selectedTab == _LibraryTab.albums && _openedAlbum != null) ||
+      (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null);
 
   bool get hasOpenDetail => _isDetailView;
 
   bool get _isCollectionTab =>
       (_selectedTab == _LibraryTab.artists && _openedArtist == null) ||
-      (_selectedTab == _LibraryTab.albums && _openedAlbum == null);
+      (_selectedTab == _LibraryTab.albums && _openedAlbum == null) ||
+      (_selectedTab == _LibraryTab.podcasts && _openedPodcast == null);
 
   bool get _isGridMode => _selectedTab == _LibraryTab.artists
       ? _artistsGridMode
-      : _selectedTab == _LibraryTab.albums && _albumsGridMode;
+      : _selectedTab == _LibraryTab.albums
+      ? _albumsGridMode
+      : _selectedTab == _LibraryTab.podcasts && _podcastsGridMode;
 
   bool _isUnknownAlbum(String album) {
     final normalized = album.trim().toLowerCase();
+
     return normalized.isEmpty ||
         normalized == 'desconocido' ||
         normalized == 'unknown' ||
@@ -143,6 +150,9 @@ class LibraryScreenState extends State<LibraryScreen>
             _albumsGridMode = decoded['albumsGridMode'] is bool
                 ? decoded['albumsGridMode'] as bool
                 : false;
+            _podcastsGridMode = decoded['podcastsGridMode'] is bool
+                ? decoded['podcastsGridMode'] as bool
+                : false;
           }
         }
       }
@@ -188,6 +198,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
         settings['artistsGridMode'] = _artistsGridMode;
         settings['albumsGridMode'] = _albumsGridMode;
+        settings['podcastsGridMode'] = _podcastsGridMode;
 
         await file.writeAsString(
           const JsonEncoder.withIndent('  ').convert(settings),
@@ -213,8 +224,10 @@ class LibraryScreenState extends State<LibraryScreen>
     setState(() {
       if (_selectedTab == _LibraryTab.artists) {
         _artistsGridMode = !_artistsGridMode;
-      } else {
+      } else if (_selectedTab == _LibraryTab.albums) {
         _albumsGridMode = !_albumsGridMode;
+      } else if (_selectedTab == _LibraryTab.podcasts) {
+        _podcastsGridMode = !_podcastsGridMode;
       }
     });
 
@@ -256,6 +269,7 @@ class LibraryScreenState extends State<LibraryScreen>
       _openedArtist = null;
       _openedAlbum = null;
       _openedAlbumArtist = null;
+      _openedPodcast = null;
     }, scrollTo: 0);
   }
 
@@ -279,6 +293,16 @@ class LibraryScreenState extends State<LibraryScreen>
     }, scrollTo: 0);
   }
 
+  void _openPodcast(Song song) {
+    _savedScrollOffset = _currentScrollOffset;
+    _navigate(() {
+      _openedPodcast = song.album;
+      _openedArtist = null;
+      _openedAlbum = null;
+      _openedAlbumArtist = null;
+    }, scrollTo: 0);
+  }
+
   void _goBack() {
     if (!_isDetailView) return;
 
@@ -286,6 +310,7 @@ class LibraryScreenState extends State<LibraryScreen>
       _openedArtist = null;
       _openedAlbum = null;
       _openedAlbumArtist = null;
+      _openedPodcast = null;
     }, scrollTo: _savedScrollOffset);
   }
 
@@ -300,14 +325,36 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   List<Song> _getVisibleSongs() {
-    final songs = _scanner.songs;
+    final allSongs = _scanner.songs;
+    final musicSongs = allSongs.where((song) => !song.isPodcast).toList();
+    final podcastSongs = allSongs.where((song) => song.isPodcast).toList();
+
+    if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null) {
+      return podcastSongs.where((song) {
+        if (_isUnknownAlbum(_openedPodcast!)) {
+          return _isUnknownAlbum(song.album);
+        }
+        return song.album == _openedPodcast;
+      }).toList();
+    }
+
+    if (_selectedTab == _LibraryTab.podcasts) {
+      final unique = <String, Song>{};
+      for (final song in podcastSongs) {
+        final key = _isUnknownAlbum(song.album)
+            ? '__unknown_podcast__'
+            : song.album.trim();
+        unique.putIfAbsent(key, () => song);
+      }
+      return unique.values.toList();
+    }
 
     if (_selectedTab == _LibraryTab.artists && _openedArtist != null) {
-      return songs.where((song) => song.artist == _openedArtist).toList();
+      return musicSongs.where((song) => song.artist == _openedArtist).toList();
     }
 
     if (_selectedTab == _LibraryTab.albums && _openedAlbum != null) {
-      return songs.where((song) {
+      return musicSongs.where((song) {
         if (_isUnknownAlbum(_openedAlbum!)) {
           return _isUnknownAlbum(song.album);
         }
@@ -318,21 +365,34 @@ class LibraryScreenState extends State<LibraryScreen>
 
     switch (_selectedTab) {
       case _LibraryTab.songs:
-        return songs;
+        return musicSongs;
+
+      case _LibraryTab.podcasts:
+        final unique = <String, Song>{};
+        for (final song in podcastSongs) {
+          final key = _isUnknownAlbum(song.album)
+              ? '__unknown_podcast__'
+              : song.album.trim();
+          unique.putIfAbsent(key, () => song);
+        }
+        return unique.values.toList();
+
       case _LibraryTab.favorites:
-        return songs.where((song) => song.favorite).toList();
+        return allSongs.where((song) => song.favorite).toList();
+
       case _LibraryTab.artists:
         final unique = <String, Song>{};
 
-        for (final song in songs) {
+        for (final song in musicSongs) {
           unique.putIfAbsent(song.artist, () => song);
         }
 
         return unique.values.toList();
+
       case _LibraryTab.albums:
         final unique = <String, Song>{};
 
-        for (final song in songs) {
+        for (final song in musicSongs) {
           final key = _isUnknownAlbum(song.album)
               ? '__unknown_album__'
               : '${song.artist}\u0000${song.album}';
@@ -341,7 +401,7 @@ class LibraryScreenState extends State<LibraryScreen>
         }
 
         return unique.values.toList();
-      case _LibraryTab.podcasts:
+
       case _LibraryTab.playlists:
         return [];
     }
@@ -356,6 +416,10 @@ class LibraryScreenState extends State<LibraryScreen>
       return _isUnknownAlbum(_openedAlbum!) ? 'Desconocido' : _openedAlbum!;
     }
 
+    if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null) {
+      return _isUnknownAlbum(_openedPodcast!) ? 'Desconocido' : _openedPodcast!;
+    }
+
     switch (_selectedTab) {
       case _LibraryTab.songs:
         return 'Todas las canciones';
@@ -364,7 +428,7 @@ class LibraryScreenState extends State<LibraryScreen>
       case _LibraryTab.playlists:
         return 'Tus playlists';
       case _LibraryTab.favorites:
-        return 'Canciones favoritas';
+        return 'Tus favoritos';
       case _LibraryTab.artists:
         return 'Tus artistas';
       case _LibraryTab.albums:
@@ -381,17 +445,26 @@ class LibraryScreenState extends State<LibraryScreen>
       return '${songs.length} canciones de este álbum';
     }
 
+    if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null) {
+      return '${songs.length} episodios de este podcast';
+    }
+
     switch (_selectedTab) {
       case _LibraryTab.songs:
         return '${_scanner.songCount} canciones en tu colección';
+
       case _LibraryTab.podcasts:
-        return 'Tus programas y episodios';
+        return '${songs.length} podcasts en tu colección';
+
       case _LibraryTab.playlists:
         return 'Tus listas de reproducción';
+
       case _LibraryTab.favorites:
-        return '${songs.length} canciones favoritas';
+        return '${songs.length} elementos favoritos';
+
       case _LibraryTab.artists:
         return '${songs.length} artistas en tu colección';
+
       case _LibraryTab.albums:
         return '${songs.length} álbumes en tu colección';
     }
@@ -497,7 +570,7 @@ class LibraryScreenState extends State<LibraryScreen>
         ),
         const SizedBox(height: 8),
         Text(
-          'Toda tu música, organizada en un solo lugar.',
+          'Toda tu música y tus podcasts, organizados en un solo lugar.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: AppTheme.textSecondary,
           ),
@@ -665,14 +738,6 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Widget _buildContent(List<Song> songs, bool isDesktop) {
-    if (_selectedTab == _LibraryTab.podcasts) {
-      return _emptyState(
-        icon: Icons.podcasts_rounded,
-        title: 'Todavía no hay podcasts',
-        message: 'Tus programas y episodios aparecerán aquí.',
-      );
-    }
-
     if (_selectedTab == _LibraryTab.playlists) {
       return _emptyState(
         icon: Icons.queue_music_rounded,
@@ -683,28 +748,47 @@ class LibraryScreenState extends State<LibraryScreen>
 
     if (songs.isEmpty) {
       final favorites = _selectedTab == _LibraryTab.favorites;
+      final podcasts = _selectedTab == _LibraryTab.podcasts;
       final artistDetail =
           _selectedTab == _LibraryTab.artists && _openedArtist != null;
       final albumDetail =
           _selectedTab == _LibraryTab.albums && _openedAlbum != null;
+      final podcastDetail =
+          _selectedTab == _LibraryTab.podcasts && _openedPodcast != null;
 
       return _emptyState(
-        icon: favorites
+        icon: podcasts
+            ? Icons.podcasts_rounded
+            : favorites
             ? Icons.favorite_border_rounded
             : artistDetail
             ? Icons.person_outline_rounded
             : albumDetail
             ? Icons.album_outlined
+            : podcastDetail
+            ? Icons.podcasts_rounded
             : Icons.music_off_rounded,
-        title: favorites
+        title: podcasts && !podcastDetail
+            ? 'Todavía no hay podcasts'
+            : podcastDetail
+            ? 'No hay episodios de este podcast'
+            : favorites
             ? 'Todavía no tienes favoritos'
             : artistDetail
             ? 'No hay canciones de este artista'
             : albumDetail
             ? 'No hay canciones de este álbum'
+            : podcastDetail
+            ? 'No hay episodios de este podcast'
             : 'Tu biblioteca está vacía',
-        message: favorites
-            ? 'Marca canciones como favoritas para verlas aquí.'
+        message: podcasts && !podcastDetail
+            ? 'Agrega directorios en Configuración > Biblioteca > Podcasts y escanea tus archivos.'
+            : podcastDetail
+            ? 'Los episodios aparecerán aquí cuando estén disponibles en tu biblioteca.'
+            : favorites
+            ? 'Marca canciones o episodios como favoritos para verlos aquí.'
+            : podcastDetail
+            ? 'Los episodios aparecerán aquí cuando estén disponibles en tu biblioteca.'
             : artistDetail || albumDetail
             ? 'Las canciones aparecerán aquí cuando estén disponibles en tu biblioteca.'
             : 'Agrega directorios en Configuración > Biblioteca y escanea tus archivos.',
@@ -723,6 +807,22 @@ class LibraryScreenState extends State<LibraryScreen>
           : _buildCollectionList(songs, isDesktop, isArtist: false);
     }
 
+    if (_selectedTab == _LibraryTab.podcasts && _openedPodcast == null) {
+      return _podcastsGridMode
+          ? _buildCollectionGrid(
+              songs,
+              isDesktop,
+              isArtist: false,
+              isPodcast: true,
+            )
+          : _buildCollectionList(
+              songs,
+              isDesktop,
+              isArtist: false,
+              isPodcast: true,
+            );
+    }
+
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
@@ -739,9 +839,17 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildCollectionArtwork(Song song, bool isArtist) {
+  Widget _buildCollectionArtwork(
+    Song song,
+    bool isArtist, {
+    bool isPodcast = false,
+  }) {
     final artworkPath = song.artworkPath;
-    final fallbackIcon = isArtist ? Icons.person_rounded : Icons.album_rounded;
+    final fallbackIcon = isArtist
+        ? Icons.person_rounded
+        : isPodcast
+        ? Icons.podcasts_rounded
+        : Icons.album_rounded;
 
     Widget placeholder() {
       return Container(
@@ -778,6 +886,7 @@ class LibraryScreenState extends State<LibraryScreen>
     List<Song> songs,
     bool isDesktop, {
     required bool isArtist,
+    bool isPodcast = false,
   }) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
@@ -827,6 +936,8 @@ class LibraryScreenState extends State<LibraryScreen>
                     onTap: () {
                       if (isArtist) {
                         _openArtist(song.artist);
+                      } else if (isPodcast) {
+                        _openPodcast(song);
                       } else {
                         _openAlbum(song);
                       }
@@ -838,7 +949,11 @@ class LibraryScreenState extends State<LibraryScreen>
                       ),
                       child: Row(
                         children: [
-                          _buildCollectionArtwork(song, isArtist),
+                          _buildCollectionArtwork(
+                            song,
+                            isArtist,
+                            isPodcast: isPodcast,
+                          ),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Text(
@@ -873,6 +988,7 @@ class LibraryScreenState extends State<LibraryScreen>
     List<Song> songs,
     bool isDesktop, {
     required bool isArtist,
+    bool isPodcast = false,
   }) {
     return SliverLayoutBuilder(
       builder: (context, constraints) {
@@ -916,6 +1032,8 @@ class LibraryScreenState extends State<LibraryScreen>
                       onTap: () {
                         if (isArtist) {
                           _openArtist(song.artist);
+                        } else if (isPodcast) {
+                          _openPodcast(song);
                         } else {
                           _openAlbum(song);
                         }
@@ -930,7 +1048,11 @@ class LibraryScreenState extends State<LibraryScreen>
                                 width: double.infinity,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
-                                  child: _buildGridArtwork(song, isArtist),
+                                  child: _buildGridArtwork(
+                                    song,
+                                    isArtist,
+                                    isPodcast: isPodcast,
+                                  ),
                                 ),
                               ),
                             ),
@@ -958,9 +1080,13 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildGridArtwork(Song song, bool isArtist) {
+  Widget _buildGridArtwork(Song song, bool isArtist, {bool isPodcast = false}) {
     final path = song.artworkPath;
-    final icon = isArtist ? Icons.person_rounded : Icons.album_rounded;
+    final icon = isArtist
+        ? Icons.person_rounded
+        : isPodcast
+        ? Icons.podcasts_rounded
+        : Icons.album_rounded;
 
     Widget placeholder() {
       return Container(
@@ -1090,8 +1216,12 @@ class _EntryTransitionState extends State<_EntryTransition> {
   }
 
   CurvedAnimation _createCurve() {
-    final begin = (widget.index * _EntryTransition.stagger).clamp(0.0, 1.0);
-    final end = (begin + _EntryTransition.span).clamp(begin, 1.0);
+    final double begin = (widget.index * _EntryTransition.stagger)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final double end = (begin + _EntryTransition.span)
+        .clamp(begin, 1.0)
+        .toDouble();
 
     return CurvedAnimation(
       parent: widget.animation,
