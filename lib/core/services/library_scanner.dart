@@ -16,6 +16,7 @@ class LibraryScanner extends ChangeNotifier {
 
   static const _settingsFileName = 'settings.decibex';
   static const _indexFileName = 'library_index.json';
+  static const _favoritesFileName = 'favorites.json';
 
   static const _audioExtensions = {
     '.mp3',
@@ -39,6 +40,8 @@ class LibraryScanner extends ChangeNotifier {
   final Map<String, Map<String, dynamic>> _index = {};
   final List<StreamSubscription<FileSystemEvent>> _watchers = [];
 
+  final LinkedHashSet<String> _favoritePaths = LinkedHashSet<String>();
+
   List<Song> _songs = [];
   List<String> _directories = [];
 
@@ -50,12 +53,14 @@ class LibraryScanner extends ChangeNotifier {
 
   Future<void>? _activeScan;
   Future<void>? _configurationRefresh;
+  Future<void> _favoritesWriteQueue = Future<void>.value();
 
   bool _recursive = true;
   bool _initialized = false;
   bool _disposed = false;
   bool _scanRequested = false;
   bool _configurationRefreshRequested = false;
+  bool _legacyFavoritesFound = false;
 
   int _configurationRevision = 0;
 
@@ -79,6 +84,30 @@ class LibraryScanner extends ChangeNotifier {
     return getApplicationSupportDirectory();
   }
 
+  Future<Directory> _dataDirectory() async {
+    late final Directory directory;
+
+    if (Platform.isAndroid) {
+      final external = await getExternalStorageDirectory();
+
+      if (external != null) {
+        directory = external;
+      } else {
+        final support = await getApplicationSupportDirectory();
+        directory = Directory('${support.path}/decibex');
+      }
+    } else {
+      final support = await getApplicationSupportDirectory();
+      directory = Directory('${support.path}/decibex');
+    }
+
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
+    return directory;
+  }
+
   Future<Directory> _cacheDirectory() async {
     final support = await getApplicationSupportDirectory();
     final directory = Directory('${support.path}/decibex/library_cache');
@@ -88,6 +117,11 @@ class LibraryScanner extends ChangeNotifier {
     }
 
     return directory;
+  }
+
+  Future<File> _favoritesFile() async {
+    final directory = await _dataDirectory();
+    return File('${directory.path}/$_favoritesFileName');
   }
 
   void _notifyIfAlive() {
@@ -103,6 +137,19 @@ class LibraryScanner extends ChangeNotifier {
 
     try {
       await _loadIndex();
+
+      if (_disposed) return;
+
+      await _loadFavorites();
+
+      if (_disposed) return;
+
+      if (_legacyFavoritesFound) {
+        await _saveIndex();
+        _legacyFavoritesFound = false;
+      }
+
+      _publishSongs();
 
       if (_disposed) return;
 
@@ -134,20 +181,69 @@ class LibraryScanner extends ChangeNotifier {
       if (_disposed) return;
 
       if (decoded is Map) {
-        for (final entry in decoded.entries) {
-          if (entry.key is String && entry.value is Map) {
-            try {
-              _index[entry.key as String] = Map<String, dynamic>.from(
-                entry.value as Map,
-              );
-            } catch (_) {}
-          }
-        }
+        for (final item in decoded.entries) {
+          if (item.key is! String || item.value is! Map) continue;
 
-        _publishSongs();
+          try {
+            final path = item.key as String;
+            final entry = Map<String, dynamic>.from(item.value as Map);
+
+            if (entry.remove('favorite') == true) {
+              _favoritePaths.add(path);
+              _legacyFavoritesFound = true;
+            }
+
+            if (entry.containsKey('favorite')) {
+              _legacyFavoritesFound = true;
+              entry.remove('favorite');
+            }
+
+            _index[path] = entry;
+          } catch (_) {}
+        }
       }
     } catch (_) {
       _index.clear();
+    }
+  }
+
+  Future<void> _loadFavorites() async {
+    if (_disposed) return;
+
+    final file = await _favoritesFile();
+
+    if (_disposed) return;
+
+    if (!await file.exists()) {
+      await _saveFavorites();
+
+      if (_legacyFavoritesFound && !_disposed) {
+        await _saveFavorites();
+      }
+
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(await file.readAsString());
+
+      if (_disposed) return;
+
+      if (decoded is Map) {
+        final favorites = decoded['favorites'];
+
+        if (favorites is List) {
+          _favoritePaths
+            ..clear()
+            ..addAll(favorites.whereType<String>());
+        }
+      } else if (decoded is List) {
+        _favoritePaths
+          ..clear()
+          ..addAll(decoded.whereType<String>());
+      }
+    } catch (e) {
+      debugPrint('[LibraryScanner] No se pudieron cargar los favoritos: $e');
     }
   }
 
@@ -161,19 +257,65 @@ class LibraryScanner extends ChangeNotifier {
     final file = File('${cacheDirectory.path}/$_indexFileName');
     final temporaryFile = File('${file.path}.tmp');
 
-    await temporaryFile.writeAsString(jsonEncode(_index), flush: true);
+    final cleanIndex = <String, Map<String, dynamic>>{};
+
+    for (final item in _index.entries) {
+      final entry = Map<String, dynamic>.from(item.value);
+      entry.remove('favorite');
+      cleanIndex[item.key] = entry;
+    }
+
+    final contents = jsonEncode(cleanIndex);
+
+    await temporaryFile.writeAsString(contents, flush: true);
 
     if (_disposed) return;
 
     try {
       await temporaryFile.rename(file.path);
     } catch (_) {
-      await file.writeAsString(jsonEncode(_index), flush: true);
+      await file.writeAsString(contents, flush: true);
 
       if (await temporaryFile.exists()) {
         await temporaryFile.delete();
       }
     }
+  }
+
+  Future<void> _saveFavorites() {
+    final snapshot = List<String>.from(_favoritePaths);
+
+    final operation = _favoritesWriteQueue.then((_) async {
+      if (_disposed) return;
+
+      final file = await _favoritesFile();
+
+      if (_disposed) return;
+
+      final temporaryFile = File('${file.path}.tmp');
+
+      final contents = jsonEncode({'favorites': snapshot});
+
+      await temporaryFile.writeAsString(contents, flush: true);
+
+      if (_disposed) return;
+
+      try {
+        await temporaryFile.rename(file.path);
+      } catch (_) {
+        await file.writeAsString(contents, flush: true);
+
+        if (await temporaryFile.exists()) {
+          await temporaryFile.delete();
+        }
+      }
+    });
+
+    _favoritesWriteQueue = operation.catchError((Object e) {
+      debugPrint('[LibraryScanner] Error guardando favoritos: $e');
+    });
+
+    return operation;
   }
 
   Future<void> refreshConfiguration() {
@@ -595,7 +737,6 @@ class LibraryScanner extends ChangeNotifier {
         'artist': artist,
         'album': album,
         'duration': duration,
-        'favorite': previous?['favorite'] == true,
         'filePath': path,
         'artworkPath': artworkPath,
         'modified': stat.modified.millisecondsSinceEpoch,
@@ -610,7 +751,6 @@ class LibraryScanner extends ChangeNotifier {
           'artist': 'Artista desconocido',
           'album': 'Álbum desconocido',
           'duration': '0:00',
-          'favorite': false,
           'filePath': path,
           'artworkPath': null,
           'modified': 0,
@@ -627,9 +767,12 @@ class LibraryScanner extends ChangeNotifier {
 
     final songs = <Song>[];
 
-    for (final item in _index.values) {
+    for (final item in _index.entries) {
       try {
-        final song = Song.fromJson(item);
+        final songData = Map<String, dynamic>.from(item.value);
+        songData['favorite'] = _favoritePaths.contains(item.key);
+
+        final song = Song.fromJson(songData);
 
         if (song.filePath != null) {
           songs.add(song);
@@ -639,8 +782,6 @@ class LibraryScanner extends ChangeNotifier {
       }
     }
 
-    // Ordena por el nombre de archivo sin extensión (el mismo que se muestra
-    // en el listado). La ruta actúa como desempate para que sea determinista.
     final keyed = [for (final song in songs) MapEntry(_sortKey(song), song)];
 
     keyed.sort((a, b) {
@@ -660,26 +801,32 @@ class LibraryScanner extends ChangeNotifier {
 
     final path = song.filePath;
 
-    if (path == null) return;
+    if (path == null || !_index.containsKey(path)) return;
 
-    final entry = _index[path];
+    final wasFavorite = _favoritePaths.contains(path);
 
-    if (entry == null || entry['favorite'] == favorite) return;
+    if (wasFavorite == favorite) return;
 
-    entry['favorite'] = favorite;
-
-    final songIndex = _songs.indexWhere((item) => item.filePath == path);
-
-    if (songIndex != -1) {
-      _songs[songIndex] = Song.fromJson(entry);
+    if (favorite) {
+      _favoritePaths.add(path);
+    } else {
+      _favoritePaths.remove(path);
     }
 
-    _notifyIfAlive();
+    _publishSongs();
 
     try {
-      await _saveIndex();
+      await _saveFavorites();
     } catch (e) {
       if (_disposed) return;
+
+      if (wasFavorite) {
+        _favoritePaths.add(path);
+      } else {
+        _favoritePaths.remove(path);
+      }
+
+      _publishSongs();
 
       error = 'No se pudo guardar el favorito: $e';
       _notifyIfAlive();
