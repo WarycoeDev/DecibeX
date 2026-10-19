@@ -350,7 +350,15 @@ class PlaybackService extends ChangeNotifier {
       initialPosition: Duration.zero,
     );
 
-    await _player.play();
+    // El Future de play() solo se completa cuando la canción se pausa o
+    // termina. Si se espera con await, _isLoading (y _handlingCompletion)
+    // se quedan en true durante toda la canción y los botones de
+    // anterior/siguiente permanecen deshabilitados.
+    unawaited(
+      _player.play().catchError((Object error) {
+        debugPrint('[PlaybackService] Error al reproducir: $error');
+      }),
+    );
   }
 
   Future<void> appendToPlaybackQueue(Song song) async {
@@ -512,7 +520,12 @@ class PlaybackService extends ChangeNotifier {
       if (_player.processingState == ProcessingState.completed) {
         await _loadAndPlaySong(_currentSong!);
       } else {
-        await _player.play();
+        // Igual que en _loadAndPlaySong: no esperar el Future de play().
+        unawaited(
+          _player.play().catchError((Object error) {
+            debugPrint('[PlaybackService] Error al reanudar: $error');
+          }),
+        );
       }
     } else if (_playingSongs.isNotEmpty) {
       await playQueue();

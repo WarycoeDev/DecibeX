@@ -129,8 +129,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       body: SafeArea(
         top: false,
         child: AnimatedBuilder(
+          // PlaybackQueue se escucha aquí para que la pantalla se reconstruya
+          // al añadir, quitar o reordenar canciones de la cola.
           animation: Listenable.merge([
             PlaybackService.instance,
+            PlaybackQueue.instance,
             LibraryScanner.instance,
           ]),
           builder: (context, child) {
