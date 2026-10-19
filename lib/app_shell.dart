@@ -151,16 +151,17 @@ class _AppShellState extends State<AppShell> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      useSafeArea: true,
+      useSafeArea: false, // el PlayerScreen ya gestiona su propio SafeArea
       backgroundColor: AppTheme.surfaceVariant,
       barrierColor: Colors.black54,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius
+            .zero, // sin esquinas para que quede a ras del borde superior
       ),
       clipBehavior: Clip.antiAlias,
       builder: (context) {
         return SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.94,
+          height: MediaQuery.sizeOf(context).height, // pantalla completa
           child: const PlayerScreen(),
         );
       },

@@ -311,6 +311,30 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
+  Future<void> playSongFromQueue(Song song) async {
+    if (_isLoading) return;
+
+    final index = _playingSongs.indexWhere((item) => _sameSong(item, song));
+
+    if (index < 0 || index >= _player.audioSources.length) {
+      debugPrint(
+        '[PlaybackService] La canción no está cargada '
+        'en el reproductor: ${song.title}',
+      );
+      return;
+    }
+
+    try {
+      _seekTarget = null;
+      _seekStartedAt = null;
+
+      await _player.seek(Duration.zero, index: index);
+      await _player.play();
+    } catch (error) {
+      debugPrint('[PlaybackService] Error al seleccionar canción: $error');
+    }
+  }
+
   Future<void> playNext() async {
     if (!canPlayNext) return;
 

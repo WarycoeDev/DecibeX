@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -61,12 +62,10 @@ class SongListTile extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                  child: Text(
-                    _displayTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
+                  child: _ScrollingTitle(
+                    title: _displayTitle,
                     style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
                   ),
                 ),
                 ListTile(
@@ -110,8 +109,6 @@ class SongListTile extends StatelessWidget {
 
     switch (action) {
       case 'replace':
-        if (queue.isEmpty) return;
-
         queue.replace(song);
         await playback.playQueue();
         break;
@@ -165,10 +162,8 @@ class SongListTile extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              _displayTitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            _ScrollingTitle(
+                              title: _displayTitle,
                               style: Theme.of(
                                 sheetContext,
                               ).textTheme.titleMedium,
@@ -269,10 +264,8 @@ class SongListTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _displayTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    _ScrollingTitle(
+                      title: _displayTitle,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -315,6 +308,188 @@ class SongListTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ScrollingTitle extends StatefulWidget {
+  final String title;
+  final TextStyle? style;
+  final TextAlign textAlign;
+
+  const _ScrollingTitle({
+    required this.title,
+    this.style,
+    this.textAlign = TextAlign.start,
+  });
+
+  @override
+  State<_ScrollingTitle> createState() => _ScrollingTitleState();
+}
+
+class _ScrollingTitleState extends State<_ScrollingTitle> {
+  final ScrollController _controller = ScrollController();
+
+  Timer? _timer;
+  bool _scrolling = false;
+  bool _initialized = false;
+  double _cycleWidth = 0;
+
+  static const Duration _pauseDuration = Duration(seconds: 5);
+  static const double _pixelsPerSecond = 35;
+  static const double _gap = 48;
+
+  @override
+  void didUpdateWidget(covariant _ScrollingTitle oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.title != widget.title || oldWidget.style != widget.style) {
+      _timer?.cancel();
+      _scrolling = false;
+      _initialized = false;
+      _cycleWidth = 0;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        if (_controller.hasClients) {
+          _controller.jumpTo(0);
+        }
+
+        setState(() {});
+      });
+    }
+  }
+
+  void _configure(double textWidth, double availableWidth) {
+    if (!mounted || !_controller.hasClients) return;
+
+    final shouldScroll = textWidth > availableWidth + 1;
+
+    if (!shouldScroll) {
+      _timer?.cancel();
+      _initialized = true;
+
+      if (_scrolling) {
+        setState(() {
+          _scrolling = false;
+        });
+      }
+
+      return;
+    }
+
+    final newCycleWidth = textWidth + _gap;
+
+    if (_initialized && _scrolling && (_cycleWidth - newCycleWidth).abs() < 1) {
+      return;
+    }
+
+    _timer?.cancel();
+    _cycleWidth = newCycleWidth;
+    _initialized = true;
+
+    setState(() {
+      _scrolling = true;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.hasClients) return;
+
+      _controller.jumpTo(0);
+      _startScrolling();
+    });
+  }
+
+  void _startScrolling() {
+    _timer?.cancel();
+
+    if (!mounted || !_controller.hasClients || _cycleWidth <= 0) {
+      return;
+    }
+
+    Future<void>(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+
+      while (mounted && _controller.hasClients && _scrolling) {
+        final duration = Duration(
+          milliseconds: (_cycleWidth / _pixelsPerSecond * 1000).round(),
+        );
+
+        await _controller.animateTo(
+          _controller.offset + _cycleWidth,
+          duration: duration,
+          curve: Curves.linear,
+        );
+
+        if (!mounted || !_controller.hasClients || !_scrolling) return;
+
+        await Future<void>.delayed(_pauseDuration);
+
+        if (!mounted || !_controller.hasClients || !_scrolling) return;
+
+        _controller.jumpTo(0);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textPainter = TextPainter(
+          text: TextSpan(text: widget.title, style: widget.style),
+          maxLines: 1,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+
+        final textWidth = textPainter.width;
+        final availableWidth = constraints.maxWidth;
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _configure(textWidth, availableWidth);
+        });
+
+        return SizedBox(
+          height: (widget.style?.fontSize ?? 14) * 1.7,
+          width: double.infinity,
+          child: ClipRect(
+            child: SingleChildScrollView(
+              controller: _controller,
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.title,
+                    softWrap: false,
+                    maxLines: 1,
+                    style: widget.style,
+                  ),
+                  if (_scrolling) ...[
+                    SizedBox(width: _gap),
+                    Text(
+                      widget.title,
+                      softWrap: false,
+                      maxLines: 1,
+                      style: widget.style,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
