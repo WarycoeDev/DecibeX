@@ -456,59 +456,35 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> removeFromPlaybackQueue(Song song) async {
-    final index = _indexOfSong(_playingSongs, song);
+    final current = _currentSong;
 
-    if (index == -1) return;
-
-    final removedCurrent =
-        _currentSong != null && _sameSong(_currentSong!, song);
-
-    _playingSongs.removeAt(index);
-
-    _shuffleOrder.removeWhere((item) => _sameSong(item, song));
-
-    if (_playingSongs.isEmpty) {
-      await stop();
+    if (current != null && _sameSong(current, song)) {
+      debugPrint(
+        '[PlaybackService] No se puede eliminar la canción actual: ${song.title}',
+      );
       return;
     }
 
-    if (removedCurrent) {
-      final nextIndex = index >= _playingSongs.length
-          ? _playingSongs.length - 1
-          : index;
+    final queue = PlaybackQueue.instance;
 
-      final nextSong = _playingSongs[nextIndex];
+    if (!queue.contains(song)) return;
 
-      if (_shuffleEnabled) {
-        _buildShuffleOrder(keepCurrentFirst: nextSong);
-      }
+    queue.remove(song);
 
-      _isLoading = true;
-      notifyListeners();
+    _playingSongs.removeWhere((item) => _sameSong(item, song));
+    _shuffleOrder.removeWhere((item) => _sameSong(item, song));
 
-      try {
-        await _loadAndPlaySong(nextSong);
-      } catch (error) {
-        debugPrint(
-          '[PlaybackService] No se pudo continuar tras eliminar la canción: $error',
-        );
-      } finally {
-        _isLoading = false;
-        notifyListeners();
-      }
-    } else {
-      _currentQueueIndex = _currentSong == null
-          ? -1
-          : _indexOfSong(_playingSongs, _currentSong!);
+    _currentQueueIndex = current == null
+        ? -1
+        : _indexOfSong(_playingSongs, current);
 
-      _shuffleCursor = _currentSong == null
-          ? -1
-          : _indexOfSong(_shuffleOrder, _currentSong!);
-
-      notifyListeners();
-    }
+    _shuffleCursor = current == null
+        ? -1
+        : _indexOfSong(_shuffleOrder, current);
 
     debugPrint('[PlaybackService] Eliminada de la cola: ${song.title}');
+
+    notifyListeners();
   }
 
   Future<void> pause() async {

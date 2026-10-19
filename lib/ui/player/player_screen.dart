@@ -1105,6 +1105,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       },
                                     );
                                   },
+
                                   itemBuilder: (context, index) {
                                     final item = queue[index];
                                     final selected = _isCurrentQueueSong(
@@ -1124,174 +1125,228 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           : Radius.zero,
                                     );
 
-                                    return AnimatedContainer(
-                                      key: ValueKey<String>(
+                                    final itemKey =
                                         item.filePath ??
-                                            '${item.title}_${item.artist}',
-                                      ),
-                                      duration: const Duration(
-                                        milliseconds: 280,
-                                      ),
-                                      curve: Curves.easeInOutCubic,
-                                      clipBehavior: Clip.antiAlias,
-                                      decoration: BoxDecoration(
-                                        color: selected
-                                            ? colors.primary.withValues(
-                                                alpha: 0.10,
-                                              )
-                                            : AppTheme.surface,
-                                        borderRadius: radius,
-                                        border: Border(
-                                          left: BorderSide(
-                                            color: AppTheme.surfaceVariant,
-                                            width: 0.7,
+                                        '${item.title}_${item.artist}';
+
+                                    return Dismissible(
+                                      key: ValueKey<String>('dialog_$itemKey'),
+                                      direction: selected
+                                          ? DismissDirection.none
+                                          : DismissDirection.startToEnd,
+                                      dismissThresholds: const {
+                                        DismissDirection.startToEnd: 0.3,
+                                      },
+                                      background: Container(
+                                        alignment: Alignment.centerLeft,
+                                        padding: const EdgeInsets.only(
+                                          left: 24,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.withValues(
+                                            alpha: 0.15,
                                           ),
-                                          right: BorderSide(
-                                            color: AppTheme.surfaceVariant,
-                                            width: 0.7,
-                                          ),
-                                          top: isFirst
-                                              ? BorderSide(
-                                                  color:
-                                                      AppTheme.surfaceVariant,
-                                                  width: 0.7,
-                                                )
-                                              : BorderSide.none,
-                                          bottom: BorderSide(
-                                            color: AppTheme.surfaceVariant,
-                                            width: 0.7,
+                                          borderRadius: BorderRadius.vertical(
+                                            top: isFirst
+                                                ? const Radius.circular(18)
+                                                : Radius.zero,
+                                            bottom: isLast
+                                                ? const Radius.circular(18)
+                                                : Radius.zero,
                                           ),
                                         ),
+                                        child: const Icon(
+                                          Icons.delete_outline_rounded,
+                                          color: Colors.red,
+                                          size: 28,
+                                        ),
                                       ),
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: selected
-                                              ? null
-                                              : () async {
-                                                  await playback
-                                                      .playSongFromQueue(item);
-                                                },
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 12,
+                                      onDismissed: (_) {
+                                        unawaited(
+                                          playback.removeFromPlaybackQueue(
+                                            item,
+                                          ),
+                                        );
+                                      },
+                                      child: AnimatedContainer(
+                                        key: ValueKey<String>(itemKey),
+                                        duration: const Duration(
+                                          milliseconds: 280,
+                                        ),
+                                        curve: Curves.easeInOutCubic,
+                                        clipBehavior: Clip.antiAlias,
+                                        decoration: BoxDecoration(
+                                          color: selected
+                                              ? colors.primary.withValues(
+                                                  alpha: 0.10,
+                                                )
+                                              : AppTheme.surface,
+                                          borderRadius: radius,
+                                          border: Border(
+                                            left: BorderSide(
+                                              color: AppTheme.surfaceVariant,
+                                              width: 0.7,
                                             ),
-                                            child: Row(
-                                              children: [
-                                                ClipRRect(
-                                                  borderRadius:
-                                                      BorderRadius.circular(12),
-                                                  child: SizedBox(
-                                                    width: 48,
-                                                    height: 48,
-                                                    child: Stack(
-                                                      fit: StackFit.expand,
-                                                      children: [
-                                                        if (artworkPath !=
-                                                                null &&
-                                                            artworkPath
-                                                                .isNotEmpty)
-                                                          Image.file(
-                                                            File(artworkPath),
-                                                            fit: BoxFit.cover,
-                                                            cacheWidth: 144,
-                                                            cacheHeight: 144,
-                                                            errorBuilder:
-                                                                (
-                                                                  context,
-                                                                  error,
-                                                                  stackTrace,
-                                                                ) {
-                                                                  return _queueArtworkFallback(
-                                                                    colors,
-                                                                  );
-                                                                },
-                                                          )
-                                                        else
-                                                          _queueArtworkFallback(
-                                                            colors,
-                                                          ),
-                                                        if (selected &&
-                                                            playback.isPlaying)
-                                                          Container(
-                                                            color: Colors.black
-                                                                .withValues(
-                                                                  alpha: 0.45,
-                                                                ),
-                                                            alignment: Alignment
-                                                                .center,
-                                                            child: Icon(
-                                                              Icons
-                                                                  .equalizer_rounded,
-                                                              color: colors
-                                                                  .primary,
-                                                              size: 26,
+                                            right: BorderSide(
+                                              color: AppTheme.surfaceVariant,
+                                              width: 0.7,
+                                            ),
+                                            top: isFirst
+                                                ? BorderSide(
+                                                    color:
+                                                        AppTheme.surfaceVariant,
+                                                    width: 0.7,
+                                                  )
+                                                : BorderSide.none,
+                                            bottom: BorderSide(
+                                              color: AppTheme.surfaceVariant,
+                                              width: 0.7,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: selected
+                                                ? null
+                                                : () async {
+                                                    await playback
+                                                        .playSongFromQueue(
+                                                          item,
+                                                        );
+                                                  },
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 12,
+                                                  ),
+                                              child: Row(
+                                                children: [
+                                                  ClipRRect(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                    child: SizedBox(
+                                                      width: 48,
+                                                      height: 48,
+                                                      child: Stack(
+                                                        fit: StackFit.expand,
+                                                        children: [
+                                                          if (artworkPath !=
+                                                                  null &&
+                                                              artworkPath
+                                                                  .isNotEmpty)
+                                                            Image.file(
+                                                              File(artworkPath),
+                                                              fit: BoxFit.cover,
+                                                              cacheWidth: 144,
+                                                              cacheHeight: 144,
+                                                              errorBuilder:
+                                                                  (
+                                                                    context,
+                                                                    error,
+                                                                    stackTrace,
+                                                                  ) {
+                                                                    return _queueArtworkFallback(
+                                                                      colors,
+                                                                    );
+                                                                  },
+                                                            )
+                                                          else
+                                                            _queueArtworkFallback(
+                                                              colors,
                                                             ),
+                                                          if (selected &&
+                                                              playback
+                                                                  .isPlaying)
+                                                            Container(
+                                                              color: Colors
+                                                                  .black
+                                                                  .withValues(
+                                                                    alpha: 0.45,
+                                                                  ),
+                                                              alignment:
+                                                                  Alignment
+                                                                      .center,
+                                                              child: Icon(
+                                                                Icons
+                                                                    .equalizer_rounded,
+                                                                color: colors
+                                                                    .primary,
+                                                                size: 26,
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 14),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          item.title,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: TextStyle(
+                                                            fontWeight: selected
+                                                                ? FontWeight
+                                                                      .bold
+                                                                : FontWeight
+                                                                      .w600,
+                                                            color: selected
+                                                                ? colors.primary
+                                                                : null,
                                                           ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 4,
+                                                        ),
+                                                        Text(
+                                                          item.artist.isEmpty
+                                                              ? 'Artista desconocido'
+                                                              : item.artist,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            color: AppTheme
+                                                                .textSecondary,
+                                                          ),
+                                                        ),
                                                       ],
                                                     ),
                                                   ),
-                                                ),
-                                                const SizedBox(width: 14),
-                                                Expanded(
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Text(
-                                                        item.title,
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: TextStyle(
-                                                          fontWeight: selected
-                                                              ? FontWeight.bold
-                                                              : FontWeight.w600,
-                                                          color: selected
-                                                              ? colors.primary
-                                                              : null,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(height: 4),
-                                                      Text(
-                                                        item.artist.isEmpty
-                                                            ? 'Artista desconocido'
-                                                            : item.artist,
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          color: AppTheme
-                                                              .textSecondary,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                                ReorderableDragStartListener(
-                                                  index: index,
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.only(
-                                                          left: 8,
-                                                          top: 8,
-                                                          bottom: 8,
-                                                        ),
-                                                    child: Icon(
-                                                      Icons.drag_handle_rounded,
-                                                      color: AppTheme
-                                                          .textSecondary
-                                                          .withValues(
-                                                            alpha: 0.7,
+                                                  ReorderableDragStartListener(
+                                                    index: index,
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                            left: 8,
+                                                            top: 8,
+                                                            bottom: 8,
                                                           ),
-                                                      size: 23,
+                                                      child: Icon(
+                                                        Icons
+                                                            .drag_handle_rounded,
+                                                        color: AppTheme
+                                                            .textSecondary
+                                                            .withValues(
+                                                              alpha: 0.7,
+                                                            ),
+                                                        size: 23,
+                                                      ),
                                                     ),
                                                   ),
-                                                ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -1902,127 +1957,156 @@ class _DesktopQueueListState extends State<_DesktopQueueList> {
         final artworkPath = item.artworkPath;
         final isFirst = index == 0;
         final isLast = index == widget.queue.length - 1;
+        final itemKey = item.filePath ?? '${item.title}_${item.artist}';
 
-        return AnimatedContainer(
-          key: ValueKey<String>(
-            item.filePath ?? '${item.title}_${item.artist}',
-          ),
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeInOutCubic,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: selected
-                ? widget.colors.primary.withValues(alpha: 0.10)
-                : AppTheme.surface,
-            borderRadius: BorderRadius.vertical(
-              top: isFirst ? const Radius.circular(18) : Radius.zero,
-              bottom: isLast ? const Radius.circular(18) : Radius.zero,
+        return Dismissible(
+          key: ValueKey<String>('desktop_$itemKey'),
+          direction: selected
+              ? DismissDirection.none
+              : DismissDirection.startToEnd,
+          dismissThresholds: const {DismissDirection.startToEnd: 0.3},
+          background: Container(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.only(left: 24),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.vertical(
+                top: isFirst ? const Radius.circular(18) : Radius.zero,
+                bottom: isLast ? const Radius.circular(18) : Radius.zero,
+              ),
             ),
-            border: Border(
-              left: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-              right: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-              top: isFirst
-                  ? BorderSide(color: AppTheme.surfaceVariant, width: 0.7)
-                  : BorderSide.none,
-              bottom: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
+            child: const Icon(
+              Icons.delete_outline_rounded,
+              color: Colors.red,
+              size: 28,
             ),
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: selected
-                  ? null
-                  : () async {
-                      await widget.playback.playSongFromQueue(item);
-                    },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                child: Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: SizedBox(
-                        width: 48,
-                        height: 48,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (artworkPath != null && artworkPath.isNotEmpty)
-                              Image.file(
-                                File(artworkPath),
-                                fit: BoxFit.cover,
-                                cacheWidth: 144,
-                                cacheHeight: 144,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return widget.artworkFallback(widget.colors);
-                                },
-                              )
-                            else
-                              widget.artworkFallback(widget.colors),
-                            if (selected && widget.playback.isPlaying)
-                              Container(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  Icons.equalizer_rounded,
-                                  color: widget.colors.primary,
-                                  size: 26,
+          onDismissed: (_) {
+            unawaited(widget.playback.removeFromPlaybackQueue(item));
+          },
+          child: AnimatedContainer(
+            key: ValueKey<String>(itemKey),
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeInOutCubic,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: selected
+                  ? widget.colors.primary.withValues(alpha: 0.10)
+                  : AppTheme.surface,
+              borderRadius: BorderRadius.vertical(
+                top: isFirst ? const Radius.circular(18) : Radius.zero,
+                bottom: isLast ? const Radius.circular(18) : Radius.zero,
+              ),
+              border: Border(
+                left: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
+                right: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
+                top: isFirst
+                    ? BorderSide(color: AppTheme.surfaceVariant, width: 0.7)
+                    : BorderSide.none,
+                bottom: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
+              ),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: selected
+                    ? null
+                    : () async {
+                        await widget.playback.playSongFromQueue(item);
+                      },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (artworkPath != null && artworkPath.isNotEmpty)
+                                Image.file(
+                                  File(artworkPath),
+                                  fit: BoxFit.cover,
+                                  cacheWidth: 144,
+                                  cacheHeight: 144,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return widget.artworkFallback(
+                                      widget.colors,
+                                    );
+                                  },
+                                )
+                              else
+                                widget.artworkFallback(widget.colors),
+                              if (selected && widget.playback.isPlaying)
+                                Container(
+                                  color: Colors.black.withValues(alpha: 0.45),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    Icons.equalizer_rounded,
+                                    color: widget.colors.primary,
+                                    size: 26,
+                                  ),
                                 ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: selected
+                                    ? FontWeight.bold
+                                    : FontWeight.w600,
+                                color: selected ? widget.colors.primary : null,
                               ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              item.artist.isEmpty
+                                  ? 'Artista desconocido'
+                                  : item.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: selected
-                                  ? FontWeight.bold
-                                  : FontWeight.w600,
-                              color: selected ? widget.colors.primary : null,
-                            ),
+                      ReorderableDragStartListener(
+                        index: index,
+                        child: Padding(
+                          padding: const EdgeInsets.only(
+                            left: 8,
+                            top: 8,
+                            bottom: 8,
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.artist.isEmpty
-                                ? 'Artista desconocido'
-                                : item.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            color: AppTheme.textSecondary.withValues(
+                              alpha: 0.7,
                             ),
+                            size: 23,
                           ),
-                        ],
-                      ),
-                    ),
-                    ReorderableDragStartListener(
-                      index: index,
-                      child: Padding(
-                        padding: const EdgeInsets.only(
-                          left: 8,
-                          top: 8,
-                          bottom: 8,
-                        ),
-                        child: Icon(
-                          Icons.drag_handle_rounded,
-                          color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                          size: 23,
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
