@@ -517,7 +517,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       barrierDismissible: true,
       builder: (dialogContext) {
         return AnimatedBuilder(
-          animation: PlaybackService.instance,
+          animation: Listenable.merge([
+            PlaybackService.instance,
+            PlaybackQueue.instance,
+          ]),
           builder: (context, _) {
             final playback = PlaybackService.instance;
             final queue = PlaybackQueue.instance.songs;
@@ -610,21 +613,76 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 ],
                               ),
                             )
-                          : ListView.builder(
+                          : ReorderableListView.builder(
                               key: const PageStorageKey<String>(
                                 'playback_queue_table',
                               ),
                               padding: const EdgeInsets.all(12),
                               itemCount: queue.length,
+                              buildDefaultDragHandles: false,
+                              onReorder: (oldIndex, newIndex) {
+                                if (queue.length < 2 || oldIndex == newIndex) {
+                                  return;
+                                }
+
+                                playback.reorderPlaybackQueue(
+                                  oldIndex,
+                                  newIndex,
+                                );
+                              },
+                              proxyDecorator: (child, index, animation) {
+                                final draggedSong = queue[index];
+
+                                return AnimatedBuilder(
+                                  animation: animation,
+                                  child: child,
+                                  builder: (context, child) {
+                                    final progress = Curves.easeOutCubic
+                                        .transform(
+                                          animation.value.clamp(0.0, 1.0),
+                                        );
+
+                                    final radius = 18.0 * progress;
+
+                                    final isFirst = index == 0;
+                                    final isLast = index == queue.length - 1;
+
+                                    final targetRadius = BorderRadius.only(
+                                      topLeft: Radius.circular(
+                                        isFirst ? radius : 0,
+                                      ),
+                                      topRight: Radius.circular(
+                                        isFirst ? radius : 0,
+                                      ),
+                                      bottomLeft: Radius.circular(
+                                        isLast ? radius : 0,
+                                      ),
+                                      bottomRight: Radius.circular(
+                                        isLast ? radius : 0,
+                                      ),
+                                    );
+
+                                    return Material(
+                                      color: Colors.transparent,
+                                      elevation: 6 * progress,
+                                      shadowColor: Colors.black.withValues(
+                                        alpha: 0.22 * progress,
+                                      ),
+                                      borderRadius: targetRadius,
+                                      clipBehavior: Clip.antiAlias,
+                                      child: child,
+                                    );
+                                  },
+                                );
+                              },
                               itemBuilder: (context, index) {
                                 final song = queue[index];
                                 final selected = isCurrentSong(song);
                                 final artworkPath = song.artworkPath;
-
                                 final isFirst = index == 0;
                                 final isLast = index == queue.length - 1;
 
-                                final borderRadius = BorderRadius.vertical(
+                                final targetRadius = BorderRadius.vertical(
                                   top: isFirst
                                       ? const Radius.circular(18)
                                       : Radius.zero,
@@ -633,151 +691,164 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       : Radius.zero,
                                 );
 
-                                return RepaintBoundary(
-                                  child: Container(
-                                    key: ValueKey<String>(
-                                      song.filePath ??
-                                          '${song.title}_${song.artist}_$index',
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: selected
-                                          ? colors.primary.withValues(
-                                              alpha: 0.10,
-                                            )
-                                          : AppTheme.surface,
-                                      border: Border(
-                                        left: BorderSide(
-                                          color: AppTheme.surfaceVariant,
-                                          width: 0.7,
-                                        ),
-                                        right: BorderSide(
-                                          color: AppTheme.surfaceVariant,
-                                          width: 0.7,
-                                        ),
-                                        top: isFirst
-                                            ? BorderSide(
-                                                color: AppTheme.surfaceVariant,
-                                                width: 0.7,
-                                              )
-                                            : BorderSide.none,
-                                        bottom: BorderSide(
-                                          color: AppTheme.surfaceVariant,
-                                          width: 0.7,
-                                        ),
-                                      ),
-                                      borderRadius: borderRadius,
-                                    ),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      borderRadius: borderRadius,
-                                      clipBehavior: Clip.antiAlias,
-                                      child: InkWell(
-                                        onTap: selected
-                                            ? null
-                                            : () async {
-                                                await playback
-                                                    .playSongFromQueue(song);
-                                              },
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 12,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                child: SizedBox(
-                                                  width: 48,
-                                                  height: 48,
-                                                  child: Stack(
-                                                    fit: StackFit.expand,
-                                                    children: [
-                                                      if (artworkPath != null &&
-                                                          artworkPath
-                                                              .isNotEmpty)
-                                                        Image.file(
-                                                          File(artworkPath),
-                                                          fit: BoxFit.cover,
-                                                          cacheWidth: 144,
-                                                          cacheHeight: 144,
-                                                          errorBuilder:
-                                                              (
-                                                                context,
-                                                                error,
-                                                                stackTrace,
-                                                              ) {
-                                                                return _queueArtworkFallback(
-                                                                  colors,
-                                                                );
-                                                              },
-                                                        )
-                                                      else
-                                                        _queueArtworkFallback(
-                                                          colors,
-                                                        ),
+                                final songKey = ValueKey<String>(
+                                  song.filePath ??
+                                      '${song.title}_${song.artist}',
+                                );
 
-                                                      if (selected &&
-                                                          playback.isPlaying)
-                                                        Container(
-                                                          color: Colors.black
-                                                              .withValues(
-                                                                alpha: 0.45,
-                                                              ),
-                                                          alignment:
-                                                              Alignment.center,
-                                                          child: Icon(
-                                                            Icons
-                                                                .equalizer_rounded,
-                                                            color:
-                                                                colors.primary,
-                                                            size: 26,
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 14),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
+                                return AnimatedContainer(
+                                  key: songKey,
+                                  duration: const Duration(milliseconds: 280),
+                                  curve: Curves.easeInOutCubic,
+                                  clipBehavior: Clip.antiAlias,
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? colors.primary.withValues(alpha: 0.10)
+                                        : AppTheme.surface,
+                                    borderRadius: targetRadius,
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: AppTheme.surfaceVariant,
+                                        width: 0.7,
+                                      ),
+                                      right: BorderSide(
+                                        color: AppTheme.surfaceVariant,
+                                        width: 0.7,
+                                      ),
+                                      top: isFirst
+                                          ? BorderSide(
+                                              color: AppTheme.surfaceVariant,
+                                              width: 0.7,
+                                            )
+                                          : BorderSide.none,
+                                      bottom: BorderSide(
+                                        color: AppTheme.surfaceVariant,
+                                        width: 0.7,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: selected
+                                          ? null
+                                          : () async {
+                                              await playback.playSongFromQueue(
+                                                song,
+                                              );
+                                            },
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 12,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              child: SizedBox(
+                                                width: 48,
+                                                height: 48,
+                                                child: Stack(
+                                                  fit: StackFit.expand,
                                                   children: [
-                                                    Text(
-                                                      song.title,
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                        fontWeight: selected
-                                                            ? FontWeight.bold
-                                                            : FontWeight.w600,
-                                                        color: selected
-                                                            ? colors.primary
-                                                            : null,
+                                                    if (artworkPath != null &&
+                                                        artworkPath.isNotEmpty)
+                                                      Image.file(
+                                                        File(artworkPath),
+                                                        fit: BoxFit.cover,
+                                                        cacheWidth: 144,
+                                                        cacheHeight: 144,
+                                                        errorBuilder:
+                                                            (
+                                                              context,
+                                                              error,
+                                                              stackTrace,
+                                                            ) {
+                                                              return _queueArtworkFallback(
+                                                                colors,
+                                                              );
+                                                            },
+                                                      )
+                                                    else
+                                                      _queueArtworkFallback(
+                                                        colors,
                                                       ),
-                                                    ),
-                                                    const SizedBox(height: 4),
-                                                    Text(
-                                                      song.artist.isEmpty
-                                                          ? 'Artista desconocido'
-                                                          : song.artist,
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: AppTheme
-                                                            .textSecondary,
+                                                    if (selected &&
+                                                        playback.isPlaying)
+                                                      Container(
+                                                        color: Colors.black
+                                                            .withValues(
+                                                              alpha: 0.45,
+                                                            ),
+                                                        alignment:
+                                                            Alignment.center,
+                                                        child: Icon(
+                                                          Icons
+                                                              .equalizer_rounded,
+                                                          color: colors.primary,
+                                                          size: 26,
+                                                        ),
                                                       ),
-                                                    ),
                                                   ],
                                                 ),
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                            const SizedBox(width: 14),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    song.title,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontWeight: selected
+                                                          ? FontWeight.bold
+                                                          : FontWeight.w600,
+                                                      color: selected
+                                                          ? colors.primary
+                                                          : null,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Text(
+                                                    song.artist.isEmpty
+                                                        ? 'Artista desconocido'
+                                                        : song.artist,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: AppTheme
+                                                          .textSecondary,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            ReorderableDragStartListener(
+                                              index: index,
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                  left: 8,
+                                                  top: 8,
+                                                  bottom: 8,
+                                                ),
+                                                child: Icon(
+                                                  Icons.drag_handle_rounded,
+                                                  color: AppTheme.textSecondary
+                                                      .withValues(alpha: 0.7),
+                                                  size: 23,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ),
@@ -789,7 +860,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     Padding(
                       padding: const EdgeInsets.all(12),
                       child: Text(
-                        'Pulsa una canción para reproducirla',
+                        queue.length > 1
+                            ? 'Arrastra el icono para cambiar el orden'
+                            : 'Pulsa una canción para reproducirla',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.textSecondary,

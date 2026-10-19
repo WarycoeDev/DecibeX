@@ -252,6 +252,81 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
+  Future<void> reorderPlaybackQueue(int oldIndex, int newIndex) async {
+    final queue = PlaybackQueue.instance;
+    final queueSongs = queue.songs;
+
+    if (oldIndex < 0 ||
+        oldIndex >= queueSongs.length ||
+        newIndex < 0 ||
+        newIndex > queueSongs.length) {
+      return;
+    }
+
+    if (newIndex > oldIndex) {
+      newIndex--;
+    }
+
+    if (oldIndex == newIndex) return;
+
+    final movedSong = queueSongs[oldIndex];
+    final playingIndex = _playingSongs.indexWhere(
+      (song) => _sameSong(song, movedSong),
+    );
+
+    final currentSongBeforeMove = _currentSong;
+    final positionBeforeMove = _position;
+
+    if (!queue.move(oldIndex, newIndex)) return;
+
+    if (playingIndex == -1 || _player.audioSources.isEmpty) {
+      return;
+    }
+
+    final reorderedSongs = queue.songs;
+    final desiredPlayingSongs = reorderedSongs
+        .where(
+          (song) =>
+              _playingSongs.any((playingSong) => _sameSong(playingSong, song)),
+        )
+        .toList();
+
+    final targetPlayingIndex = desiredPlayingSongs.indexWhere(
+      (song) => _sameSong(song, movedSong),
+    );
+
+    if (targetPlayingIndex == -1 ||
+        targetPlayingIndex >= _player.audioSources.length) {
+      return;
+    }
+
+    if (playingIndex != targetPlayingIndex) {
+      try {
+        await _player.moveAudioSource(playingIndex, targetPlayingIndex);
+
+        _playingSongs = desiredPlayingSongs;
+        _currentSong = currentSongBeforeMove;
+        _position = positionBeforeMove;
+
+        final currentIndex = _player.currentIndex;
+
+        if (currentIndex != null &&
+            currentIndex >= 0 &&
+            currentIndex < _playingSongs.length) {
+          _currentSong = currentSongBeforeMove ?? _playingSongs[currentIndex];
+        }
+
+        notifyListeners();
+
+        debugPrint(
+          '[PlaybackService] Cola reordenada sin reiniciar la reproducción',
+        );
+      } catch (error) {
+        debugPrint('[PlaybackService] Error al reordenar la cola: $error');
+      }
+    }
+  }
+
   Future<void> removeFromPlaybackQueue(Song song) async {
     final index = _playingSongs.indexWhere((item) => _sameSong(item, song));
 

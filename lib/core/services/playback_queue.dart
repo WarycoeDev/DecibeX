@@ -47,6 +47,23 @@ class PlaybackQueue extends ChangeNotifier {
     return true;
   }
 
+  bool move(int oldIndex, int newIndex) {
+    if (oldIndex < 0 ||
+        oldIndex >= _songs.length ||
+        newIndex < 0 ||
+        newIndex >= _songs.length ||
+        oldIndex == newIndex) {
+      return false;
+    }
+
+    final song = _songs.removeAt(oldIndex);
+    _songs.insert(newIndex, song);
+
+    _logQueue('Canción reordenada: ${song.title}');
+    notifyListeners();
+    return true;
+  }
+
   void replace(Song song) {
     _songs
       ..clear()
