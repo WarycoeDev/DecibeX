@@ -182,6 +182,61 @@ class PlaylistService extends ChangeNotifier {
     return null;
   }
 
+  /// Devuelve el contenido `.decibex` (JSON) de una playlist sin escribirla
+  /// en el directorio interno de la app.
+  String exportContent(Playlist playlist) => playlist.encode();
+
+  /// Nombre de archivo seguro para exportar (mismo criterio que el interno).
+  String exportFileName(Playlist playlist) =>
+      '${_safeFileName(playlist.name)}$extension';
+
+  /// Importa una playlist desde el contenido de un archivo `.decibex`.
+  /// Genera un nuevo `id` y, si el nombre ya existe, añade un sufijo
+  /// numérico para evitar colisiones.
+  Future<Playlist> importFromContent(String content) async {
+    await initialize();
+
+    final dynamic decoded = jsonDecode(content);
+    if (decoded is! Map) {
+      throw const FormatException(
+        'El archivo no contiene una playlist válida.',
+      );
+    }
+
+    final Map<String, dynamic> map = decoded is Map<String, dynamic>
+        ? decoded
+        : Map<String, dynamic>.from(decoded as Map);
+
+    final imported = Playlist.fromJson(map);
+    final now = DateTime.now();
+
+    final playlist = Playlist(
+      id: '${now.microsecondsSinceEpoch}',
+      name: _uniqueName(imported.name),
+      songPaths: _uniquePaths(imported.songPaths),
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    await _write(playlist);
+    _playlists.add(playlist);
+    _sort();
+    notifyListeners();
+    return playlist;
+  }
+
+  String _uniqueName(String base) {
+    final clean = _validateName(base);
+    if (!_nameExists(clean)) return clean;
+
+    var counter = 2;
+    while (true) {
+      final candidate = '$clean ($counter)';
+      if (candidate.length <= 80 && !_nameExists(candidate)) return candidate;
+      counter++;
+    }
+  }
+
   Future<void> _write(Playlist playlist) async {
     final file = await _fileFor(playlist);
     await file.writeAsString(playlist.encode(), flush: true);

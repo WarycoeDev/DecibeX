@@ -1,9 +1,9 @@
 import 'dart:convert';
-
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-
 import 'package:path_provider/path_provider.dart';
 
 import '../app_theme.dart';
@@ -397,13 +397,7 @@ class LibraryScreenState extends State<LibraryScreen>
         );
       } while (_saveViewModesAgain);
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo guardar el modo de visualización.'),
-          ),
-        );
-      }
+      // Silencioso: no mostramos SnackBar.
     } finally {
       _savingViewModes = false;
     }
@@ -1067,8 +1061,8 @@ class LibraryScreenState extends State<LibraryScreen>
             _openedPlaylistId == null) ...[
           const SizedBox(width: 8),
           IconButton(
-            tooltip: 'Crear playlist',
-            onPressed: _createPlaylist,
+            tooltip: 'Añadir playlist',
+            onPressed: _showPlaylistAddMenu,
             icon: const Icon(Icons.add_rounded),
           ),
         ],
@@ -1154,6 +1148,51 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
+  Future<void> _showPlaylistAddMenu() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surfaceVariant,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.playlist_add_rounded),
+                  title: const Text('Crear playlist'),
+                  onTap: () => Navigator.pop(sheetContext, 'create'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.file_open_rounded),
+                  title: const Text('Importar playlist'),
+                  onTap: () => Navigator.pop(sheetContext, 'import'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.close_rounded),
+                  title: const Text('Cancelar'),
+                  onTap: () => Navigator.pop(sheetContext, 'cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || action == null || action == 'cancel') return;
+
+    if (action == 'create') {
+      await _createPlaylist();
+    } else if (action == 'import') {
+      await _importPlaylist();
+    }
+  }
+
   Future<void> _createPlaylist() async {
     final name = await showDialog<String>(
       context: context,
@@ -1173,8 +1212,47 @@ class LibraryScreenState extends State<LibraryScreen>
         _openedPlaylistId = playlist.id;
         _reorderingPlaylist = false;
       }, scrollTo: 0);
-    } catch (error) {
-      _showPlaylistError(error);
+    } catch (_) {
+      // Silencioso.
+    }
+  }
+
+  Future<void> _importPlaylist() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        dialogTitle: 'Importar playlist',
+        type: FileType.custom,
+        allowedExtensions: [
+          PlaylistService.extension.replaceFirst('.', ''), // 'decibex'
+        ],
+      );
+
+      if (result == null || result.isEmpty) return;
+
+      final picked = result.first;
+
+      // Validación manual: si el selector ignoró el filtro (Android),
+      // comprobamos la extensión aquí y descartamos cualquier otra cosa.
+      final nameLower = picked.name.toLowerCase();
+      if (!nameLower.endsWith(PlaylistService.extension)) {
+        return; // Archivo no válido: se ignora silenciosamente.
+      }
+
+      final bytes = await picked.readAsBytes();
+      final content = utf8.decode(bytes);
+
+      if (content.trim().isEmpty) return;
+
+      final playlist = await _playlistService.importFromContent(content);
+      if (!mounted) return;
+
+      _savedScrollOffset = _currentScrollOffset;
+      _navigate(() {
+        _openedPlaylistId = playlist.id;
+        _reorderingPlaylist = false;
+      }, scrollTo: 0);
+    } catch (_) {
+      // Silencioso.
     }
   }
 
@@ -1192,20 +1270,41 @@ class LibraryScreenState extends State<LibraryScreen>
     if (name == null || !mounted) return;
     try {
       await _playlistService.rename(playlist, name);
-    } catch (error) {
-      _showPlaylistError(error);
+    } catch (_) {
+      // Silencioso.
     }
   }
 
-  void _showPlaylistError(Object error) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error.toString().replaceFirst('Invalid argument(s): ', ''),
-        ),
-      ),
-    );
+  Future<void> _exportPlaylist(Playlist playlist) async {
+    try {
+      final content = _playlistService.exportContent(playlist);
+      final fileName = _playlistService.exportFileName(playlist);
+      final bytes = Uint8List.fromList(utf8.encode(content));
+
+      final output = await FilePicker.saveFile(
+        dialogTitle: 'Exportar playlist',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: [PlaylistService.extension.replaceFirst('.', '')],
+        bytes: bytes,
+      );
+
+      if (output == null) return;
+
+      // En desktop, file_picker solo devuelve la ruta/Uri elegida y NO
+      // escribe el archivo: hay que escribirlo manualmente.
+      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        final String path;
+        if (output is Uri) {
+          path = output.toFilePath();
+        } else {
+          path = output.toString();
+        }
+        await File(path).writeAsBytes(bytes, flush: true);
+      }
+    } catch (_) {
+      // Silencioso.
+    }
   }
 
   Future<void> _deletePlaylist(Playlist playlist) async {
@@ -1578,6 +1677,11 @@ class LibraryScreenState extends State<LibraryScreen>
                       onTap: () => Navigator.pop(sheetContext, 'rename'),
                     ),
                     ListTile(
+                      leading: const Icon(Icons.ios_share_rounded),
+                      title: const Text('Exportar'),
+                      onTap: () => Navigator.pop(sheetContext, 'export'),
+                    ),
+                    ListTile(
                       leading: Icon(
                         Icons.delete_outline_rounded,
                         color: Theme.of(sheetContext).colorScheme.error,
@@ -1605,6 +1709,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
           if (action == 'rename') {
             _renamePlaylist(playlist);
+          } else if (action == 'export') {
+            _exportPlaylist(playlist);
           } else if (action == 'delete') {
             _deletePlaylist(playlist);
           }
@@ -1707,7 +1813,7 @@ class LibraryScreenState extends State<LibraryScreen>
         return _emptyState(
           icon: Icons.queue_music_rounded,
           title: 'Todavía no hay playlists',
-          message: 'Crea una playlist para organizar tus canciones.',
+          message: 'Crea o importa una playlist para organizar tus canciones.',
         );
       }
       return _buildPlaylistsCollection(isDesktop);
