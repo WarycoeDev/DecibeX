@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'app_shell.dart';
 import 'ui/app_theme.dart';
+import 'core/services/statistics_service.dart';
+import 'core/services/podcast_statistics_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,6 +31,7 @@ class DecibeXApp extends StatefulWidget {
 
 class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
   bool _permissionRequested = false;
+  bool _servicesInitialized = false;
 
   @override
   void initState() {
@@ -35,8 +39,28 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Inicializar servicios y permisos después del primer frame para no
+      // bloquear el arranque de la app (causa típica de "se queda instalando").
+      _initServices();
       _requestStoragePermission();
     });
+  }
+
+  Future<void> _initServices() async {
+    if (_servicesInitialized) return;
+    _servicesInitialized = true;
+
+    try {
+      await StatisticsService.instance.init();
+    } catch (e) {
+      debugPrint('[main] StatisticsService init error: $e');
+    }
+
+    try {
+      await PodcastStatisticsService.instance.init();
+    } catch (e) {
+      debugPrint('[main] PodcastStatisticsService init error: $e');
+    }
   }
 
   Future<void> _requestStoragePermission() async {
@@ -59,6 +83,13 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (Platform.isAndroid && state == AppLifecycleState.resumed) {
       _checkStoragePermission();
+    }
+
+    // Guardar la posición del episodio al minimizar o cerrar.
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(PodcastStatisticsService.instance.flush());
     }
   }
 

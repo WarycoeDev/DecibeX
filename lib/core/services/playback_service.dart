@@ -7,7 +7,8 @@ import 'package:just_audio/just_audio.dart';
 
 import '../models/song.dart';
 import 'playback_queue.dart';
-import 'statistics_service.dart'; // [STATS] nuevo import
+import 'statistics_service.dart';
+import 'podcast_statistics_service.dart';
 
 class PlaybackService extends ChangeNotifier {
   PlaybackService._() {
@@ -56,14 +57,15 @@ class PlaybackService extends ChangeNotifier {
 
       _position = value;
 
-      // [STATS] Reportar posición para el conteo de reproducciones
       StatisticsService.instance.onPositionChanged(value);
+      PodcastStatisticsService.instance.onPositionChanged(value);
 
       notifyListeners();
     });
 
     _player.durationStream.listen((value) {
       _duration = value ?? Duration.zero;
+      PodcastStatisticsService.instance.onDurationChanged(_duration);
       notifyListeners();
     });
 
@@ -82,8 +84,8 @@ class PlaybackService extends ChangeNotifier {
           _seekTarget = null;
           _seekStartedAt = null;
 
-          // [STATS] Notificar cambio de canción
           StatisticsService.instance.onSongChanged(taggedSong);
+          PodcastStatisticsService.instance.onSongChanged(taggedSong);
         }
       }
 
@@ -342,9 +344,8 @@ class PlaybackService extends ChangeNotifier {
     _currentSong = song;
     _currentQueueIndex = _indexOfSong(_playingSongs, song);
 
-    // [STATS] Notificar cambio de canción al servicio de estadísticas.
-    // Resetea el flag de conteo por si la misma canción se repite (LoopMode.one).
     StatisticsService.instance.onSongChanged(song);
+    PodcastStatisticsService.instance.onSongChanged(song);
 
     if (_shuffleEnabled) {
       _shuffleCursor = _indexOfSong(_shuffleOrder, song);
@@ -357,9 +358,14 @@ class PlaybackService extends ChangeNotifier {
 
     notifyListeners();
 
+    // Reanudar podcasts desde la posición guardada (si no terminó).
+    final initialPosition = song.isPodcast
+        ? PodcastStatisticsService.instance.resumePositionFor(song)
+        : Duration.zero;
+
     await _player.setAudioSource(
       AudioSource.file(path, tag: song),
-      initialPosition: Duration.zero,
+      initialPosition: initialPosition,
     );
 
     // El Future de play() solo se completa cuando la canción se pausa o
@@ -501,6 +507,7 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> pause() async {
     await _player.pause();
+    await PodcastStatisticsService.instance.flush();
   }
 
   Future<void> resume() async {
@@ -508,7 +515,6 @@ class PlaybackService extends ChangeNotifier {
       if (_player.processingState == ProcessingState.completed) {
         await _loadAndPlaySong(_currentSong!);
       } else {
-        // Igual que en _loadAndPlaySong: no esperar el Future de play().
         unawaited(
           _player.play().catchError((Object error) {
             debugPrint('[PlaybackService] Error al reanudar: $error');
@@ -681,6 +687,8 @@ class PlaybackService extends ChangeNotifier {
     _handlingCompletion = true;
 
     try {
+      PodcastStatisticsService.instance.onTrackCompleted();
+
       if (_repeatMode == LoopMode.one) {
         await _loadAndPlaySong(_currentSong!);
         return;
@@ -707,9 +715,8 @@ class PlaybackService extends ChangeNotifier {
     _seekStartedAt = DateTime.now();
     _position = position;
 
-    // [STATS] Si el seek es hacia atrás (por debajo del umbral),
-    // permitir que la canción vuelva a contar.
     StatisticsService.instance.onSeek(position);
+    PodcastStatisticsService.instance.onSeek(position);
 
     notifyListeners();
 
@@ -738,14 +745,16 @@ class PlaybackService extends ChangeNotifier {
     _seekTarget = null;
     _seekStartedAt = null;
 
-    // [STATS] Limpiar seguimiento al detener
     StatisticsService.instance.onSongChanged(null);
+    PodcastStatisticsService.instance.onSongChanged(null);
+    await PodcastStatisticsService.instance.flush();
 
     notifyListeners();
   }
 
   @override
   void dispose() {
+    unawaited(PodcastStatisticsService.instance.flush());
     unawaited(_player.dispose());
     super.dispose();
   }

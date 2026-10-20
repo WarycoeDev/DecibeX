@@ -18,6 +18,7 @@ import '../../core/services/playback_queue.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/models/playlist.dart';
 import '../../core/services/playlist_service.dart';
+import '../../core/services/podcast_statistics_service.dart'; // [PODCAST]
 
 enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
 
@@ -38,21 +39,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
   static const List<_LibraryTabData> _tabs = [
     _LibraryTabData(_LibraryTab.songs, 'Canciones', Icons.music_note_rounded),
-
     _LibraryTabData(_LibraryTab.podcasts, 'Podcasts', Icons.podcasts_rounded),
-
     _LibraryTabData(
       _LibraryTab.playlists,
-
       'Playlists',
-
       Icons.queue_music_rounded,
     ),
-
     _LibraryTabData(_LibraryTab.favorites, 'Favoritos', Icons.favorite_rounded),
-
     _LibraryTabData(_LibraryTab.artists, 'Artistas', Icons.person_rounded),
-
     _LibraryTabData(_LibraryTab.albums, 'Álbumes', Icons.album_rounded),
   ];
 
@@ -129,9 +123,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
     _entryController = AnimationController(
       vsync: this,
-
       duration: _entryDuration,
-
       value: 1,
     );
 
@@ -139,6 +131,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
     _scanner.initialize();
     _playlistService.initialize();
+    PodcastStatisticsService.instance.init(); // [PODCAST]
   }
 
   @override
@@ -205,35 +198,25 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<bool> _confirmOverwriteQueue() async {
     final result = await showModalBottomSheet<bool>(
       context: context,
-
       backgroundColor: AppTheme.surfaceVariant,
-
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-
       builder: (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
-
             child: Column(
               mainAxisSize: MainAxisSize.min,
-
               children: [
                 ListTile(
                   leading: const Icon(Icons.playlist_remove_rounded),
-
                   title: const Text('Sobrescribir cola'),
-
                   onTap: () => Navigator.pop(sheetContext, true),
                 ),
-
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-
                   title: const Text('Cancelar'),
-
                   onTap: () => Navigator.pop(sheetContext, false),
                 ),
               ],
@@ -290,6 +273,99 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     await playback.playQueue();
+  }
+
+  /// Devuelve el episodio en el que debe reanudarse:
+  /// 1) El más reciente empezado y no terminado.
+  /// 2) Si no hay, el siguiente al último episodio terminado en el orden
+  ///    de [episodes].
+  /// 3) Si no aplica ninguno, `null`.
+  /// Devuelve el episodio en el que debe reanudarse:
+  /// 1) El más reciente empezado y no terminado.
+  /// 2) Si no hay, el siguiente en la lista al último episodio terminado.
+  /// 3) Si no aplica ninguno, `null`.
+  Song? _resumeEpisode(List<Song> episodes) {
+    if (episodes.isEmpty) return null;
+
+    final stats = PodcastStatisticsService.instance;
+
+    // 1) Episodio empezado y no terminado, el más reciente por fecha.
+    Song? best;
+    DateTime? bestAt;
+
+    for (final ep in episodes) {
+      final s = stats.statsFor(ep);
+      if (s == null) continue;
+      if (s.completed) continue;
+      if (s.lastPosition <= const Duration(seconds: 3)) continue;
+
+      final at = s.lastPlayedAt;
+      if (at != null && (bestAt == null || at.isAfter(bestAt))) {
+        best = ep;
+        bestAt = at;
+      } else if (best == null) {
+        best = ep;
+      }
+    }
+
+    if (best != null) return best;
+
+    // 2) Sin empezados: buscar el último índice terminado en el orden de
+    //    la lista y devolver el siguiente.
+    int lastCompletedIndex = -1;
+
+    for (int i = 0; i < episodes.length; i++) {
+      if (stats.statsFor(episodes[i])?.completed == true) {
+        lastCompletedIndex = i; // se queda con el mayor índice terminado
+      }
+    }
+
+    if (lastCompletedIndex < 0) return null;
+
+    final nextIndex = lastCompletedIndex + 1;
+    if (nextIndex >= episodes.length) return null;
+
+    return episodes[nextIndex];
+  }
+
+  // [PODCAST] Reproduce el episodio elegido (PlaybackService reanuda solo).
+  // [PODCAST] Añade TODOS los episodios del podcast abierto a la cola y
+  // arranca directamente en el episodio elegido, en el minuto guardado.
+  Future<void> _resumePodcastEpisode(Song episode, List<Song> episodes) async {
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (episodes.isEmpty) return;
+
+    // Si ya hay algo en cola, pedir confirmación antes de sobrescribir.
+    if (!queue.isEmpty) {
+      final confirmed = await _confirmOverwriteQueue();
+      if (!mounted || !confirmed) return;
+    }
+
+    queue.clear();
+    for (final ep in episodes) {
+      queue.add(ep);
+    }
+
+    // Cargar la cola (esto empieza por el primero), pero inmediatamente
+    // saltamos al episodio con progreso pendiente.
+    await playback.playQueue();
+
+    if (!mounted) return;
+
+    // Si el episodio elegido no es el primero, saltar a él.
+    final current = playback.currentSong;
+    final sameCurrent =
+        current != null &&
+        current.filePath?.replaceAll('\\', '/') ==
+            episode.filePath?.replaceAll('\\', '/');
+
+    if (!sameCurrent) {
+      await playback.playSongFromQueue(episode);
+    }
+    // PlaybackService._loadAndPlaySong reanuda desde lastPosition
+    // automáticamente para podcasts, así que no hace falta llamar a seek().
   }
 
   Future<Directory> _getSettingsDirectory() async {
@@ -393,7 +469,6 @@ class LibraryScreenState extends State<LibraryScreen>
 
         await file.writeAsString(
           const JsonEncoder.withIndent('  ').convert(settings),
-
           flush: true,
         );
       } while (_saveViewModesAgain);
@@ -531,9 +606,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
     return _EntryTransition(
       animation: _entryController,
-
       index: index,
-
       child: child,
     );
   }
@@ -711,7 +784,12 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([_scanner, _playlistService]),
+      // [PODCAST] Escuchar cambios de estadísticas para refrescar progreso/badge.
+      animation: Listenable.merge([
+        _scanner,
+        _playlistService,
+        PodcastStatisticsService.instance,
+      ]),
 
       builder: (context, child) {
         final songs = _getVisibleSongs();
@@ -733,11 +811,8 @@ class LibraryScreenState extends State<LibraryScreen>
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(
                         isDesktop ? 36 : 20,
-
                         isDesktop ? 32 : 24,
-
                         isDesktop ? 36 : 20,
-
                         0,
                       ),
 
@@ -755,11 +830,8 @@ class LibraryScreenState extends State<LibraryScreen>
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(
                         isDesktop ? 36 : 20,
-
                         isDesktop ? 36 : 28,
-
                         isDesktop ? 36 : 20,
-
                         0,
                       ),
 
@@ -771,7 +843,6 @@ class LibraryScreenState extends State<LibraryScreen>
                     if (_scanner.isScanning)
                       const SliverPadding(
                         padding: EdgeInsets.symmetric(horizontal: 20),
-
                         sliver: SliverToBoxAdapter(
                           child: LinearProgressIndicator(),
                         ),
@@ -787,11 +858,8 @@ class LibraryScreenState extends State<LibraryScreen>
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(
                         isDesktop ? 36 : 20,
-
                         16,
-
                         isDesktop ? 36 : 20,
-
                         36,
                       ),
 
@@ -819,9 +887,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
           style: theme.textTheme.labelMedium?.copyWith(
             color: AppTheme.accent,
-
             fontWeight: FontWeight.bold,
-
             letterSpacing: 1.6,
           ),
         ),
@@ -852,9 +918,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
         Wrap(
           spacing: 10,
-
           runSpacing: 8,
-
           crossAxisAlignment: WrapCrossAlignment.center,
 
           children: [
@@ -928,6 +992,7 @@ class LibraryScreenState extends State<LibraryScreen>
         (_selectedTab == _LibraryTab.favorites ||
             (_selectedTab == _LibraryTab.artists && _openedArtist != null) ||
             (_selectedTab == _LibraryTab.albums && _openedAlbum != null) ||
+            (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null) ||
             (_selectedTab == _LibraryTab.playlists &&
                 _openedPlaylistId != null));
 
@@ -1009,7 +1074,7 @@ class LibraryScreenState extends State<LibraryScreen>
           ),
         ],
 
-        // Reordenar playlist (movido aquí, antes de los botones de playback)
+        // Reordenar playlist
         if (_selectedTab == _LibraryTab.playlists &&
             _openedPlaylistId != null) ...[
           const SizedBox(width: 8),
@@ -1022,6 +1087,35 @@ class LibraryScreenState extends State<LibraryScreen>
             ),
           ),
         ],
+
+        // [PODCAST] Botón Reanudar en detalle de podcast.
+        // Añade todos los episodios a la cola y salta al episodio pendiente
+        // en el minuto guardado.
+        if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null)
+          Builder(
+            builder: (context) {
+              final episode = _resumeEpisode(songs);
+              if (episode == null) return const SizedBox.shrink();
+
+              return Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    minimumSize: const Size(0, 44),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () => _resumePodcastEpisode(episode, songs),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                  label: const Text('Reanudar'),
+                ),
+              );
+            },
+          ),
 
         // Botones de reproducción
         if (showPlaybackButtons) ...[
@@ -1067,9 +1161,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
       decoration: BoxDecoration(
         color: AppTheme.surface,
-
         borderRadius: BorderRadius.circular(12),
-
         border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
       ),
 
@@ -1079,11 +1171,8 @@ class LibraryScreenState extends State<LibraryScreen>
         children: [
           _ViewModeButton(
             icon: Icons.view_list_rounded,
-
             selected: !isGrid,
-
             tooltip: 'Vista de lista',
-
             onTap: () {
               if (isGrid) _toggleGridMode();
             },
@@ -1091,11 +1180,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
           _ViewModeButton(
             icon: Icons.grid_view_rounded,
-
             selected: isGrid,
-
             tooltip: 'Vista de cuadrícula',
-
             onTap: () {
               if (!isGrid) _toggleGridMode();
             },
@@ -1107,15 +1193,12 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _emptyState({
     required IconData icon,
-
     required String title,
-
     required String message,
   }) {
     return SliverToBoxAdapter(
       child: _entry(
         0,
-
         _EmptyLibraryState(icon: icon, title: title, message: message),
       ),
     );
@@ -1263,8 +1346,6 @@ class LibraryScreenState extends State<LibraryScreen>
 
       if (output == null) return;
 
-      // En desktop, file_picker solo devuelve la ruta/Uri elegida y NO
-      // escribe el archivo: hay que escribirlo manualmente.
       if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
         final String path;
         if (output is Uri) {
@@ -1407,9 +1488,9 @@ class LibraryScreenState extends State<LibraryScreen>
     required double crossAxisSpacing,
     required double textHeight,
   }) {
-    const double horizontalPadding = 12 * 2; // EdgeInsets.all(12)
+    const double horizontalPadding = 12 * 2;
     const double verticalPadding = 12 * 2;
-    const double gap = 10; // SizedBox entre carátula y texto
+    const double gap = 10;
 
     final double cellWidth =
         (crossAxisExtent - crossAxisSpacing * (columns - 1)) / columns;
@@ -1439,7 +1520,6 @@ class LibraryScreenState extends State<LibraryScreen>
 
           const double spacing = 12;
 
-          // Playlists: título (2 líneas) + subtítulo (1 línea) ≈ 58 px
           final ratio = _gridAspectRatio(
             crossAxisExtent: width,
             columns: columns,
@@ -1480,7 +1560,6 @@ class LibraryScreenState extends State<LibraryScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Carátula CUADRADA, tamaño = ancho interno
                               LayoutBuilder(
                                 builder: (context, box) {
                                   final size = box.maxWidth;
@@ -1932,38 +2011,28 @@ class LibraryScreenState extends State<LibraryScreen>
       return _podcastsGridMode
           ? _buildCollectionGrid(
               songs,
-
               isDesktop,
-
               isArtist: false,
-
               isPodcast: true,
             )
           : _buildCollectionList(
               songs,
-
               isDesktop,
-
               isArtist: false,
-
               isPodcast: true,
             );
     }
 
     return _buildSongListContainer(
       songs: songs,
-
       isDesktop: isDesktop,
-
       reordering: _selectedTab == _LibraryTab.favorites && _reorderingFavorites,
     );
   }
 
   Widget _buildSongListContainer({
     required List<Song> songs,
-
     required bool isDesktop,
-
     required bool reordering,
   }) {
     final Widget list;
@@ -1971,7 +2040,6 @@ class LibraryScreenState extends State<LibraryScreen>
     if (reordering) {
       list = SliverReorderableList(
         itemCount: songs.length,
-
         onReorder: (oldIndex, newIndex) {
           if (newIndex > oldIndex) {
             newIndex--;
@@ -1993,21 +2061,16 @@ class LibraryScreenState extends State<LibraryScreen>
 
           return ReorderableDelayedDragStartListener(
             key: ValueKey(song.filePath ?? '${song.title}-$index'),
-
             index: index,
-
             child: _buildSongRow(
               song: song,
-
               isDesktop: isDesktop,
-
               showDragHandle: true,
             ),
           );
         },
       );
     } else {
-      // En la pestaña de favoritos permitimos deslizar para quitar.
       final allowSwipeToRemove = _selectedTab == _LibraryTab.favorites;
 
       list = SliverList(
@@ -2058,9 +2121,7 @@ class LibraryScreenState extends State<LibraryScreen>
     return DecoratedSliver(
       decoration: BoxDecoration(
         color: AppTheme.surface,
-
         border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
-
         borderRadius: BorderRadius.circular(18),
       ),
 
@@ -2070,9 +2131,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _buildCollectionArtwork(
     Song song,
-
     bool isArtist, {
-
     bool isPodcast = false,
   }) {
     final artworkPath = song.artworkPath;
@@ -2086,9 +2145,7 @@ class LibraryScreenState extends State<LibraryScreen>
     Widget placeholder() {
       return Container(
         color: AppTheme.accent.withValues(alpha: 0.12),
-
         alignment: Alignment.center,
-
         child: Icon(fallbackIcon, color: AppTheme.accent, size: 28),
       );
     }
@@ -2096,28 +2153,20 @@ class LibraryScreenState extends State<LibraryScreen>
     if (artworkPath == null || artworkPath.isEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
-
         child: SizedBox(width: 48, height: 48, child: placeholder()),
       );
     }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
-
       child: SizedBox(
         width: 48,
-
         height: 48,
-
         child: Image.file(
           File(artworkPath),
-
           fit: BoxFit.cover,
-
           cacheWidth: 144,
-
           cacheHeight: 144,
-
           errorBuilder: (context, error, stackTrace) => placeholder(),
         ),
       ),
@@ -2126,11 +2175,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _buildCollectionList(
     List<Song> songs,
-
     bool isDesktop, {
-
     required bool isArtist,
-
     bool isPodcast = false,
   }) {
     return SliverList(
@@ -2144,18 +2190,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
           return _entry(
             index,
-
             RepaintBoundary(
               child: Container(
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
-
                   border: Border.all(
                     color: AppTheme.surfaceVariant,
-
                     width: 0.7,
                   ),
-
                   borderRadius: BorderRadius.circular(16),
                 ),
 
@@ -2163,11 +2205,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
                 child: Material(
                   color: Colors.transparent,
-
                   borderRadius: BorderRadius.circular(16),
-
                   clipBehavior: Clip.antiAlias,
-
                   child: InkWell(
                     onTap: () {
                       if (isArtist) {
@@ -2178,44 +2217,31 @@ class LibraryScreenState extends State<LibraryScreen>
                         _openAlbum(song);
                       }
                     },
-
                     child: Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: isDesktop ? 18 : 12,
-
                         vertical: 12,
                       ),
-
                       child: Row(
                         children: [
                           _buildCollectionArtwork(
                             song,
-
                             isArtist,
-
                             isPodcast: isPodcast,
                           ),
-
                           const SizedBox(width: 14),
-
                           Expanded(
                             child: Text(
                               title,
-
                               maxLines: 2,
-
                               overflow: TextOverflow.ellipsis,
-
                               style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
-
                           const SizedBox(width: 8),
-
                           Icon(
                             Icons.chevron_right_rounded,
-
                             color: AppTheme.textSecondary,
                           ),
                         ],
@@ -2255,7 +2281,6 @@ class LibraryScreenState extends State<LibraryScreen>
 
         const double spacing = 12;
 
-        // Colecciones: solo título (2 líneas) ≈ 40 px
         final ratio = _gridAspectRatio(
           crossAxisExtent: width,
           columns: columns,
@@ -2307,7 +2332,6 @@ class LibraryScreenState extends State<LibraryScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Carátula CUADRADA, tamaño = ancho interno
                             LayoutBuilder(
                               builder: (context, box) {
                                 final size = box.maxWidth;
@@ -2366,45 +2390,99 @@ class LibraryScreenState extends State<LibraryScreen>
 
     return Image.file(
       File(path),
-
       fit: BoxFit.cover,
-
       cacheWidth: 360,
-
       cacheHeight: 360,
-
       errorBuilder: (context, error, stackTrace) => placeholder(),
     );
   }
 
+  // [PODCAST] Fila de canción que añade progreso + badge "Terminado"
+  // cuando estamos dentro de un podcast.
   Widget _buildSongRow({
     required Song song,
-
     required bool isDesktop,
-
     bool showDragHandle = false,
   }) {
+    final tile = SongListTile(
+      key: ValueKey(song.filePath ?? song.title),
+      song: song,
+      isDesktop: isDesktop,
+      onFavoriteChanged: (favorite) {
+        _scanner.setFavorite(song, favorite);
+      },
+    );
+
+    final isPodcastEpisode =
+        song.isPodcast &&
+        _selectedTab == _LibraryTab.podcasts &&
+        _openedPodcast != null;
+
+    if (!isPodcastEpisode) {
+      return RepaintBoundary(
+        child: Row(
+          children: [
+            Expanded(child: tile),
+            if (showDragHandle)
+              const Padding(
+                padding: EdgeInsets.only(right: 14),
+                child: Icon(Icons.drag_handle_rounded),
+              ),
+          ],
+        ),
+      );
+    }
+
+    final stats = PodcastStatisticsService.instance.statsFor(song);
+    final completed = stats?.completed ?? false;
+    final duration = stats?.duration ?? Duration.zero;
+    final position = stats?.lastPosition ?? Duration.zero;
+
+    final ratio = (duration.inMilliseconds > 0 && !completed)
+        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
     return RepaintBoundary(
       child: Row(
         children: [
           Expanded(
-            child: SongListTile(
-              key: ValueKey(song.filePath ?? song.title),
-
-              song: song,
-
-              isDesktop: isDesktop,
-
-              onFavoriteChanged: (favorite) {
-                _scanner.setFavorite(song, favorite);
-              },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Stack(
+                  children: [
+                    tile,
+                    if (completed)
+                      const Positioned(
+                        top: 6,
+                        left: 6,
+                        child: _PodcastCompletedBadge(),
+                      ),
+                  ],
+                ),
+                if (!completed && ratio > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: 12,
+                      right: 12,
+                      bottom: 6,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: ratio,
+                        minHeight: 3,
+                        backgroundColor: AppTheme.surfaceVariant,
+                        valueColor: AlwaysStoppedAnimation(AppTheme.accent),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-
           if (showDragHandle)
             const Padding(
               padding: EdgeInsets.only(right: 14),
-
               child: Icon(Icons.drag_handle_rounded),
             ),
         ],
@@ -2415,26 +2493,19 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget _buildError() {
     return Material(
       color: Theme.of(context).colorScheme.errorContainer,
-
       borderRadius: BorderRadius.circular(12),
-
       child: Padding(
         padding: const EdgeInsets.all(12),
-
         child: Row(
           children: [
             Icon(
               Icons.warning_amber_rounded,
-
               color: Theme.of(context).colorScheme.onErrorContainer,
             ),
-
             const SizedBox(width: 10),
-
             Expanded(
               child: Text(
                 _scanner.error!,
-
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onErrorContainer,
                 ),
@@ -2442,6 +2513,38 @@ class LibraryScreenState extends State<LibraryScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PodcastCompletedBadge extends StatelessWidget {
+  const _PodcastCompletedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.accent,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.25),
+          width: 0.8,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_circle_rounded, size: 12, color: Colors.white),
+        ],
       ),
     );
   }
@@ -2456,9 +2559,7 @@ class _EntryTransition extends StatefulWidget {
 
   const _EntryTransition({
     required this.animation,
-
     required this.index,
-
     required this.child,
   });
 
@@ -2505,7 +2606,6 @@ class _EntryTransitionState extends State<_EntryTransition> {
 
     return CurvedAnimation(
       parent: widget.animation,
-
       curve: Interval(begin, end, curve: Curves.easeOutCubic),
     );
   }
@@ -2521,16 +2621,12 @@ class _EntryTransitionState extends State<_EntryTransition> {
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _curved,
-
       child: AnimatedBuilder(
         animation: _curved,
-
         child: widget.child,
-
         builder: (context, child) {
           return Transform.translate(
             offset: Offset(0, (1 - _curved.value) * _EntryTransition.distance),
-
             child: child,
           );
         },
@@ -2558,11 +2654,8 @@ class _LibraryTabButton extends StatelessWidget {
 
   const _LibraryTabButton({
     super.key,
-
     required this.data,
-
     required this.selected,
-
     required this.onTap,
   });
 
@@ -2579,46 +2672,32 @@ class _LibraryTabButton extends StatelessWidget {
 
       child: InkWell(
         onTap: onTap,
-
         borderRadius: BorderRadius.circular(12),
-
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-
             border: Border.all(
               color: selected ? AppTheme.accent : AppTheme.surfaceVariant,
-
               width: selected ? 1.2 : 0.7,
             ),
           ),
-
           child: Row(
             mainAxisSize: MainAxisSize.min,
-
             children: [
               Icon(
                 data.icon,
-
                 size: 18,
-
                 color: selected ? AppTheme.accent : AppTheme.textSecondary,
               ),
-
               const SizedBox(width: 8),
-
               Text(
                 data.title,
-
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: selected
                       ? AppTheme.accent
                       : theme.colorScheme.onSurface,
-
                   fontWeight: selected ? FontWeight.bold : FontWeight.w500,
                 ),
               ),
@@ -2641,11 +2720,8 @@ class _ViewModeButton extends StatelessWidget {
 
   const _ViewModeButton({
     required this.icon,
-
     required this.selected,
-
     required this.tooltip,
-
     required this.onTap,
   });
 
@@ -2653,29 +2729,20 @@ class _ViewModeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-
       child: Material(
         color: selected
             ? AppTheme.accent.withValues(alpha: 0.15)
             : Colors.transparent,
-
         borderRadius: BorderRadius.circular(9),
-
         child: InkWell(
           onTap: onTap,
-
           borderRadius: BorderRadius.circular(9),
-
           child: SizedBox(
             width: 38,
-
             height: 36,
-
             child: Icon(
               icon,
-
               size: 21,
-
               color: selected ? AppTheme.accent : AppTheme.textSecondary,
             ),
           ),
@@ -2694,9 +2761,7 @@ class _EmptyLibraryState extends StatelessWidget {
 
   const _EmptyLibraryState({
     required this.icon,
-
     required this.title,
-
     required this.message,
   });
 
@@ -2706,60 +2771,40 @@ class _EmptyLibraryState extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-
       decoration: BoxDecoration(
         color: AppTheme.surface,
-
         borderRadius: BorderRadius.circular(18),
-
         border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
       ),
-
       child: Column(
         mainAxisSize: MainAxisSize.min,
-
         children: [
           Container(
             width: 64,
-
             height: 64,
-
             decoration: BoxDecoration(
               color: AppTheme.accent.withValues(alpha: 0.12),
-
               borderRadius: BorderRadius.circular(20),
             ),
-
             child: Icon(icon, size: 30, color: AppTheme.accent),
           ),
-
           const SizedBox(height: 20),
-
           Text(
             title,
-
             textAlign: TextAlign.center,
-
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
             ),
           ),
-
           const SizedBox(height: 8),
-
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 360),
-
             child: Text(
               message,
-
               textAlign: TextAlign.center,
-
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: AppTheme.textSecondary,
-
                 height: 1.5,
               ),
             ),
@@ -2836,7 +2881,6 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Cabecera
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 24, 16, 20),
               child: Row(
@@ -2892,8 +2936,6 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
               height: 1,
               color: AppTheme.textSecondary.withValues(alpha: 0.16),
             ),
-
-            // Contenido
             ValueListenableBuilder<TextEditingValue>(
               valueListenable: _controller,
               builder: (context, value, _) {
@@ -2995,13 +3037,10 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
                 );
               },
             ),
-
             Divider(
               height: 1,
               color: AppTheme.textSecondary.withValues(alpha: 0.16),
             ),
-
-            // Acciones
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
               child: Row(

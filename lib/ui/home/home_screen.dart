@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../app_theme.dart';
 import '../../core/models/song.dart';
@@ -19,71 +21,84 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const String _settingsFileName = 'settings.decibex';
+
   final LibraryScanner _scanner = LibraryScanner.instance;
   final StatisticsService _stats = StatisticsService.instance;
 
-  static const List<Song> _demoMostPlayed = [
-    Song(
-      title: 'Midnight City',
-      artist: 'M83',
-      album: 'Hurry Up, We’re Dreaming',
-      duration: '4:03',
-      icon: Icons.nightlight_round,
-      color: Color(0xFF6750A4),
-    ),
-    Song(
-      title: 'After Dark',
-      artist: 'Mr.Kitty',
-      album: 'Time',
-      duration: '4:17',
-      icon: Icons.dark_mode_rounded,
-      color: Color(0xFF344B70),
-      favorite: true,
-    ),
-    Song(
-      title: 'Resonance',
-      artist: 'HOME',
-      album: 'Odyssey',
-      duration: '3:32',
-      icon: Icons.waves_rounded,
-      color: Color(0xFF357F91),
-      favorite: true,
-    ),
-    Song(
-      title: 'Memory Reboot',
-      artist: 'VØJ, Narvent',
-      album: 'Memory Reboot',
-      duration: '3:00',
-      icon: Icons.blur_on_rounded,
-      color: Color(0xFF8C476C),
-      favorite: true,
-    ),
-    Song(
-      title: 'Snowfall',
-      artist: 'Øneheart',
-      album: 'Snowfall',
-      duration: '2:03',
-      icon: Icons.ac_unit_rounded,
-      color: Color(0xFF526B99),
-      favorite: true,
-    ),
-  ];
+  bool _hasDirectories = false;
 
   @override
   void initState() {
     super.initState();
     _scanner.initialize();
     _stats.init();
+    _loadHasDirectories();
+  }
+
+  Future<Directory> _getSettingsDirectory() async {
+    if (Platform.isAndroid) {
+      final externalDirectory = await getExternalStorageDirectory();
+
+      if (externalDirectory != null) {
+        return Directory('${externalDirectory.path}/data');
+      }
+    }
+
+    return getApplicationSupportDirectory();
+  }
+
+  Future<File> _getSettingsFile() async {
+    final directory = await _getSettingsDirectory();
+
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
+    return File('${directory.path}/$_settingsFileName');
+  }
+
+  Future<void> _loadHasDirectories() async {
+    bool hasDirs = false;
+
+    try {
+      final file = await _getSettingsFile();
+
+      if (await file.exists()) {
+        final content = await file.readAsString();
+
+        if (content.trim().isNotEmpty) {
+          final decoded = jsonDecode(content);
+
+          if (decoded is Map<String, dynamic>) {
+            final dirs = decoded['scanDirectories'];
+            if (dirs is List && dirs.whereType<String>().isNotEmpty) {
+              hasDirs = true;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      hasDirs = false;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _hasDirectories = hasDirs;
+    });
   }
 
   List<Song> _buildMostPlayed() {
-    final songs = _scanner.songs;
+    // Si no hay directorios configurados, no mostrar nada.
+    if (!_hasDirectories) return const [];
 
-    if (songs.isEmpty) return _demoMostPlayed;
+    final songs = _scanner.songs;
+    if (songs.isEmpty) return const [];
 
     final played = <MapEntry<Song, int>>[];
     for (final song in songs) {
-      if (song.isPodcast) continue; // ⬅️ excluir episodios de podcast
+      if (song.isPodcast) continue;
       final count = _stats.getPlayCount(song);
       if (count > 0) {
         played.add(MapEntry(song, count));
@@ -353,7 +368,25 @@ class _HomeScreenState extends State<HomeScreen> {
     bool isDesktop,
   ) {
     if (songs.isEmpty) {
-      final libraryIsEmpty = _scanner.songs.isEmpty;
+      final String title;
+      final String message;
+      final IconData icon;
+
+      if (!_hasDirectories) {
+        icon = Icons.folder_open_rounded;
+        title = 'Configura tu biblioteca';
+        message =
+            'Agrega una carpeta en Configuración > Biblioteca para empezar.';
+      } else if (_scanner.songs.isEmpty) {
+        icon = Icons.music_off_rounded;
+        title = 'Aún no hay canciones';
+        message = 'Escanea tu biblioteca para empezar a escuchar música.';
+      } else {
+        icon = Icons.trending_up_rounded;
+        title = 'Aún no hay canciones escuchadas';
+        message =
+            'Reproduce una canción al menos 5 segundos para que aparezca aquí.';
+      }
 
       return Container(
         width: double.infinity,
@@ -365,25 +398,17 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: Column(
           children: [
-            Icon(
-              Icons.trending_up_rounded,
-              size: 32,
-              color: AppTheme.textSecondary,
-            ),
+            Icon(icon, size: 32, color: AppTheme.textSecondary),
             const SizedBox(height: 10),
             Text(
-              libraryIsEmpty
-                  ? 'Aún no hay canciones'
-                  : 'Aún no hay canciones escuchadas',
+              title,
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             Text(
-              libraryIsEmpty
-                  ? 'Escanea tu biblioteca para empezar a escuchar música.'
-                  : 'Reproduce una canción al menos 5 segundos para que aparezca aquí.',
+              message,
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
@@ -642,9 +667,6 @@ class _PlayButton extends StatelessWidget {
   }
 }
 
-/// Copia pública de `_SongArtwork` de `song_list_tile.dart`.
-/// Renderiza la carátula real (`song.artworkPath`) con fallback al
-/// gradiente + icono si no hay imagen o falla al cargar.
 class _SongArtwork extends StatelessWidget {
   final Song song;
   final double size;
