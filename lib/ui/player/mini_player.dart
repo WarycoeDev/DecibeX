@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import 'dart:ui';
 
 class MiniPlayer extends StatelessWidget {
   final String title;
@@ -54,121 +55,131 @@ class MiniPlayer extends StatelessWidget {
               .toDouble()
         : 0.0;
 
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.surface.withValues(alpha: 0.7)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            InkWell(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            decoration: BoxDecoration(
+              // Cristal translúcido: permite ver el contenido desenfocado.
+              color: AppTheme.surfaceVariant.withValues(alpha: 0.58),
               borderRadius: BorderRadius.circular(16),
-              onTap: onExpand,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
-                child: Row(
-                  children: [
-                    _buildArtwork(48),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildAnimatedText(
-                            value: title,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                            maxLines: 1,
-                          ),
-                          if (artist.isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            _buildAnimatedText(
-                              value: artist,
-                              style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 12,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: onExpand,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+                    child: Row(
+                      children: [
+                        _buildArtwork(48),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildAnimatedText(
+                                value: title,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                                maxLines: 1,
                               ),
-                              maxLines: 1,
+                              if (artist.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                _buildAnimatedText(
+                                  value: artist,
+                                  style: TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                  maxLines: 1,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Anterior',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: canPlayPrevious ? onPrevious : null,
+                          icon: const Icon(Icons.skip_previous_rounded),
+                        ),
+                        IconButton(
+                          tooltip: isPlaying ? 'Pausar' : 'Reproducir',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onPlayPause,
+                          icon: Icon(
+                            isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Siguiente',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: canPlayNext ? onNext : null,
+                          icon: const Icon(Icons.skip_next_rounded),
+                        ),
+                        IconButton(
+                          tooltip: 'Cerrar reproductor',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onClose,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            _formatDuration(position),
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 10,
                             ),
-                          ],
+                          ),
+                          const Spacer(),
+                          Text(
+                            _formatDuration(duration),
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 10,
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'Anterior',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: canPlayPrevious ? onPrevious : null,
-                      icon: const Icon(Icons.skip_previous_rounded),
-                    ),
-                    IconButton(
-                      tooltip: isPlaying ? 'Pausar' : 'Reproducir',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onPlayPause,
-                      icon: Icon(
-                        isPlaying
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Siguiente',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: canPlayNext ? onNext : null,
-                      icon: const Icon(Icons.skip_next_rounded),
-                    ),
-                    IconButton(
-                      tooltip: 'Cerrar reproductor',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onClose,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _formatDuration(position),
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 10,
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 3,
+                        borderRadius: BorderRadius.circular(4),
+                        backgroundColor: AppTheme.surface.withValues(
+                          alpha: 0.5,
                         ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        _formatDuration(duration),
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 10,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          AppTheme.accent,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 3,
-                    borderRadius: BorderRadius.circular(4),
-                    backgroundColor: AppTheme.surface,
-                    valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

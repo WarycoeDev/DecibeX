@@ -8,6 +8,9 @@ import '../app_theme.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_scanner.dart';
 import 'song_list_tile.dart';
+import '../../core/services/playback_queue.dart';
+import '../../core/services/playback_service.dart';
+import '../library/song_list_tile.dart';
 
 enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
 
@@ -109,6 +112,124 @@ class LibraryScreenState extends State<LibraryScreen>
     if (_isDetailView) {
       _goBack();
     }
+  }
+
+  Future<void> _addSongsToQueue(List<Song> songs) async {
+    if (songs.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (!queue.isEmpty) {
+      final confirmed = await _confirmOverwriteQueue();
+      if (!mounted || !confirmed) return;
+    }
+
+    queue.clear();
+
+    for (final song in songs) {
+      queue.add(song);
+    }
+
+    await playback.playQueue();
+    await playback.pause();
+  }
+
+  Future<void> _playSongs(List<Song> songs) async {
+    if (songs.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (!queue.isEmpty) {
+      final confirmed = await _confirmOverwriteQueue();
+      if (!mounted || !confirmed) return;
+    }
+
+    queue.clear();
+
+    for (final song in songs) {
+      queue.add(song);
+    }
+
+    await playback.playQueue();
+  }
+
+  Future<bool> _confirmOverwriteQueue() async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: AppTheme.surfaceVariant,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.playlist_remove_rounded),
+                  title: const Text('Sobrescribir cola'),
+                  onTap: () => Navigator.pop(sheetContext, true),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.close_rounded),
+                  title: const Text('Cancelar'),
+                  onTap: () => Navigator.pop(sheetContext, false),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    return result ?? false;
+  }
+
+  Future<void> _addAllFavoritesToQueue(List<Song> favorites) async {
+    if (favorites.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (!queue.isEmpty) {
+      final confirmed = await _confirmOverwriteQueue();
+
+      if (!mounted || !confirmed) return;
+    }
+
+    queue.clear();
+
+    for (final song in favorites) {
+      queue.add(song);
+    }
+
+    await playback.playQueue();
+    await playback.pause();
+  }
+
+  Future<void> _playAllFavorites(List<Song> favorites) async {
+    if (favorites.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (!queue.isEmpty) {
+      final confirmed = await _confirmOverwriteQueue();
+
+      if (!mounted || !confirmed) return;
+    }
+
+    queue.clear();
+
+    for (final song in favorites) {
+      queue.add(song);
+    }
+
+    await playback.playQueue();
   }
 
   Future<Directory> _getSettingsDirectory() async {
@@ -631,6 +752,20 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget _buildSectionHeader(BuildContext context, List<Song> songs) {
     final theme = Theme.of(context);
 
+    final showPlaybackButtons =
+        songs.isNotEmpty &&
+        (_selectedTab == _LibraryTab.favorites ||
+            (_selectedTab == _LibraryTab.artists && _openedArtist != null) ||
+            (_selectedTab == _LibraryTab.albums && _openedAlbum != null));
+
+    final showReorder =
+        _selectedTab == _LibraryTab.favorites && songs.isNotEmpty;
+
+    const buttonStyle = ButtonStyle(
+      fixedSize: WidgetStatePropertyAll(Size(44, 44)),
+      padding: WidgetStatePropertyAll(EdgeInsets.zero),
+    );
+
     return Row(
       children: [
         if (_isDetailView) ...[
@@ -654,23 +789,26 @@ class LibraryScreenState extends State<LibraryScreen>
               ),
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
         ],
+
+        // Título con efecto carrusel + subtítulo
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                _sectionTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              ScrollingTitle(
+                title: _sectionTitle,
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 _sectionSubtitle(songs),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -678,9 +816,12 @@ class LibraryScreenState extends State<LibraryScreen>
             ],
           ),
         ),
-        if (_selectedTab == _LibraryTab.favorites && songs.isNotEmpty) ...[
+
+        // Botones circulares, solo icono
+        if (showReorder) ...[
           const SizedBox(width: 8),
           IconButton(
+            style: buttonStyle,
             tooltip: _reorderingFavorites
                 ? 'Terminar de ordenar'
                 : 'Reordenar favoritos',
@@ -692,6 +833,22 @@ class LibraryScreenState extends State<LibraryScreen>
                   ? Icons.check_rounded
                   : Icons.reorder_rounded,
             ),
+          ),
+        ],
+        if (showPlaybackButtons) ...[
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            style: buttonStyle,
+            tooltip: 'Agregar a la cola',
+            onPressed: () => _addSongsToQueue(songs),
+            icon: const Icon(Icons.queue_music_rounded),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filled(
+            style: buttonStyle,
+            tooltip: 'Reproducir todo',
+            onPressed: () => _playSongs(songs),
+            icon: const Icon(Icons.play_arrow_rounded),
           ),
         ],
         if (_isCollectionTab) ...[

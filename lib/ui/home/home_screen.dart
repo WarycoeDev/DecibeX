@@ -5,6 +5,8 @@ import '../app_theme.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_scanner.dart';
 import '../library/song_list_tile.dart';
+import '../../core/services/playback_queue.dart';
+import '../../core/services/playback_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -69,14 +71,122 @@ class _HomeScreenState extends State<HomeScreen> {
     _scanner.initialize();
   }
 
+  Future<void> _playAllFavorites(List<Song> favorites) async {
+    if (favorites.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    // Si la cola tiene contenido, preguntar antes de sobrescribirla.
+    if (queue.isNotEmpty) {
+      final action = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: AppTheme.surfaceVariant,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (sheetContext) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.playlist_remove_rounded),
+                    title: const Text('Sobrescribir cola'),
+                    onTap: () => Navigator.pop(sheetContext, 'replace'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.close_rounded),
+                    title: const Text('Cancelar'),
+                    onTap: () => Navigator.pop(sheetContext, 'cancel'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+      if (!mounted || action != 'replace') return;
+    }
+
+    // Sustituir la cola por los favoritos, respetando su orden.
+    queue.clear();
+
+    for (final song in favorites) {
+      queue.add(song);
+    }
+
+    // Reproducir desde la primera canción.
+    await playback.playQueue();
+  }
+
+  Future<void> _addAllFavoritesToQueue(List<Song> favorites) async {
+    if (favorites.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    // Si ya hay canciones en la cola, preguntar antes de sobrescribirla.
+    if (queue.isNotEmpty) {
+      final action = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: AppTheme.surfaceVariant,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (sheetContext) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.playlist_remove_rounded),
+                    title: const Text('Sobrescribir cola'),
+                    onTap: () => Navigator.pop(sheetContext, 'replace'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.close_rounded),
+                    title: const Text('Cancelar'),
+                    onTap: () => Navigator.pop(sheetContext, 'cancel'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+      if (!mounted || action != 'replace') return;
+    }
+
+    // Agregar todos los favoritos a la cola.
+    queue.clear();
+
+    for (final song in favorites) {
+      queue.add(song);
+    }
+
+    // Preparar el reproductor y dejarlo pausado.
+    await playback.playQueue();
+
+    if (!mounted) return;
+
+    await playback.pause();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _scanner,
       builder: (context, child) {
-        final favorites = _scanner.songs
-            .where((song) => song.favorite)
-            .toList();
+        final favorites = _scanner.orderFavorites(
+          _scanner.songs.where((song) => song.favorite),
+        );
 
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -96,7 +206,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildWelcome(context, isDesktop),
+
                       SizedBox(height: isDesktop ? 40 : 36),
+
                       _buildSectionTitle(
                         context,
                         title: 'Más escuchadas',
@@ -104,17 +216,55 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.trending_up_rounded,
                         isDesktop: isDesktop,
                       ),
+
                       SizedBox(height: isDesktop ? 24 : 20),
+
                       _buildPopularCarousel(context, isDesktop),
+
                       SizedBox(height: isDesktop ? 48 : 40),
-                      _buildSectionTitle(
-                        context,
-                        title: 'Tus favoritos',
-                        subtitle: 'Tu colección personal',
-                        icon: Icons.favorite_rounded,
-                        isDesktop: isDesktop,
+
+                      // Encabezado de favoritos y botones de acciones.
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildSectionTitle(
+                              context,
+                              title: 'Tus favoritos',
+                              subtitle: 'Tu colección personal',
+                              icon: Icons.favorite_rounded,
+                              isDesktop: isDesktop,
+                            ),
+                          ),
+
+                          const SizedBox(width: 8),
+
+                          // Agregar todos los favoritos a la cola.
+                          IconButton.filledTonal(
+                            tooltip: 'Agregar todos a la cola',
+                            onPressed: favorites.isEmpty
+                                ? null
+                                : () => _addAllFavoritesToQueue(favorites),
+                            icon: const Icon(Icons.queue_music_rounded),
+                          ),
+
+                          const SizedBox(width: 8),
+
+                          // Reproducir todos los favoritos.
+                          FilledButton.icon(
+                            onPressed: favorites.isEmpty
+                                ? null
+                                : () => _playAllFavorites(favorites),
+                            icon: const Icon(Icons.play_arrow_rounded),
+                            label: Text(
+                              isDesktop ? 'Reproducir todo' : 'Reproducir',
+                            ),
+                          ),
+                        ],
                       ),
+
                       SizedBox(height: isDesktop ? 22 : 18),
+
+                      // Lista de canciones favoritas.
                       _buildFavoritesList(favorites, isDesktop),
                     ],
                   ),

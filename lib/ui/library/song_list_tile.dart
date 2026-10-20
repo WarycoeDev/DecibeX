@@ -62,7 +62,7 @@ class SongListTile extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                  child: _ScrollingTitle(
+                  child: ScrollingTitle(
                     title: _displayTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                     textAlign: TextAlign.center,
@@ -162,7 +162,7 @@ class SongListTile extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _ScrollingTitle(
+                            ScrollingTitle(
                               title: _displayTitle,
                               style: Theme.of(
                                 sheetContext,
@@ -244,7 +244,9 @@ class SongListTile extends StatelessWidget {
     final artworkSize = isDesktop ? 50.0 : 46.0;
 
     return Material(
-      color: Colors.transparent,
+      color: AppTheme.surface,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => _onSongTap(context),
         onLongPress: () => _showContextMenu(context),
@@ -260,11 +262,12 @@ class SongListTile extends StatelessWidget {
             children: [
               _SongArtwork(song: song, size: artworkSize),
               const SizedBox(width: 12),
+
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _ScrollingTitle(
+                    ScrollingTitle(
                       title: _displayTitle,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
@@ -282,7 +285,9 @@ class SongListTile extends StatelessWidget {
                   ],
                 ),
               ),
+
               const SizedBox(width: 8),
+
               SizedBox(
                 width: 42,
                 child: Align(
@@ -295,6 +300,7 @@ class SongListTile extends StatelessWidget {
                   ),
                 ),
               ),
+
               IconButton(
                 onPressed: () => _showContextMenu(context),
                 tooltip: 'Más opciones',
@@ -312,22 +318,22 @@ class SongListTile extends StatelessWidget {
   }
 }
 
-class _ScrollingTitle extends StatefulWidget {
+class ScrollingTitle extends StatefulWidget {
   final String title;
   final TextStyle? style;
   final TextAlign textAlign;
 
-  const _ScrollingTitle({
+  const ScrollingTitle({
     required this.title,
     this.style,
     this.textAlign = TextAlign.start,
   });
 
   @override
-  State<_ScrollingTitle> createState() => _ScrollingTitleState();
+  State<ScrollingTitle> createState() => _ScrollingTitleState();
 }
 
-class _ScrollingTitleState extends State<_ScrollingTitle> {
+class _ScrollingTitleState extends State<ScrollingTitle> {
   final ScrollController _controller = ScrollController();
 
   Timer? _timer;
@@ -340,7 +346,7 @@ class _ScrollingTitleState extends State<_ScrollingTitle> {
   static const double _gap = 48;
 
   @override
-  void didUpdateWidget(covariant _ScrollingTitle oldWidget) {
+  void didUpdateWidget(covariant ScrollingTitle oldWidget) {
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.title != widget.title || oldWidget.style != widget.style) {
