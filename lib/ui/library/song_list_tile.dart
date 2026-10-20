@@ -160,10 +160,16 @@ class SongListTile extends StatelessWidget {
 
       if (playlists.isEmpty) return;
 
-      final selectedIds = <String>{
+      final songPath = song.filePath!;
+
+      // Playlists que ya contenían esta canción al abrir el diálogo.
+      final initiallyContaining = <String>{
         for (final playlist in playlists)
-          if (playlist.songPaths.contains(song.filePath)) playlist.id,
+          if (playlist.songPaths.contains(songPath)) playlist.id,
       };
+
+      // Estado seleccionado actual (arranca igual que el inicial).
+      final selectedIds = <String>{...initiallyContaining};
 
       final selectedPlaylists = await showDialog<List<Playlist>>(
         context: context,
@@ -172,6 +178,10 @@ class SongListTile extends StatelessWidget {
             builder: (context, setDialogState) {
               final theme = Theme.of(context);
               final colorScheme = theme.colorScheme;
+
+              final hasChanges =
+                  selectedIds.length != initiallyContaining.length ||
+                  !selectedIds.containsAll(initiallyContaining);
 
               return Dialog(
                 backgroundColor: AppTheme.surfaceVariant,
@@ -365,9 +375,8 @@ class SongListTile extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             FilledButton.icon(
-                              onPressed: selectedIds.isEmpty
-                                  ? null
-                                  : () {
+                              onPressed: hasChanges
+                                  ? () {
                                       Navigator.pop(
                                         dialogContext,
                                         playlists
@@ -377,7 +386,8 @@ class SongListTile extends StatelessWidget {
                                             )
                                             .toList(),
                                       );
-                                    },
+                                    }
+                                  : null,
                               style: FilledButton.styleFrom(
                                 backgroundColor: AppTheme.accent,
                                 foregroundColor: Colors.white,
@@ -405,8 +415,26 @@ class SongListTile extends StatelessWidget {
 
       if (!context.mounted || selectedPlaylists == null) return;
 
-      for (final playlist in selectedPlaylists) {
+      // Aplicar cambios: añadir a las nuevas, quitar de las deseleccionadas.
+      final toAdd = selectedPlaylists
+          .where((p) => !initiallyContaining.contains(p.id))
+          .toList();
+      final toRemove = playlists
+          .where(
+            (p) =>
+                initiallyContaining.contains(p.id) &&
+                !selectedIds.contains(p.id),
+          )
+          .toList();
+
+      for (final playlist in toAdd) {
         await service.addSongs(playlist, [song]);
+      }
+
+      for (final playlist in toRemove) {
+        final updatedPaths = List<String>.from(playlist.songPaths)
+          ..remove(songPath);
+        await service.updateSongs(playlist, updatedPaths);
       }
     } catch (_) {
       return;

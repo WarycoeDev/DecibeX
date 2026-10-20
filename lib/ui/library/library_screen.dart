@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -1718,6 +1719,13 @@ class LibraryScreenState extends State<LibraryScreen>
         .where(songByPath.containsKey)
         .toList();
     final missingCount = playlist.songPaths.length - availablePaths.length;
+
+    Future<void> removeSongFromPlaylist(String path) async {
+      final paths = List<String>.from(playlist.songPaths)..remove(path);
+      await _playlistService.updateSongs(playlist, paths);
+      if (mounted) setState(() {});
+    }
+
     final list = _reorderingPlaylist
         ? SliverReorderableList(
             itemCount: availablePaths.length,
@@ -1739,9 +1747,10 @@ class LibraryScreenState extends State<LibraryScreen>
               if (mounted) setState(() {});
             },
             itemBuilder: (context, index) {
-              final song = songByPath[availablePaths[index]]!;
+              final path = availablePaths[index];
+              final song = songByPath[path]!;
               return ReorderableDelayedDragStartListener(
-                key: ValueKey(availablePaths[index]),
+                key: ValueKey(path),
                 index: index,
                 child: Row(
                   children: [
@@ -1760,8 +1769,35 @@ class LibraryScreenState extends State<LibraryScreen>
         : SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, index) {
-                final song = songByPath[availablePaths[index]]!;
-                return _buildSongRow(song: song, isDesktop: isDesktop);
+                final path = availablePaths[index];
+                final song = songByPath[path]!;
+
+                return Dismissible(
+                  key: ValueKey<String>('playlist_remove_$path'),
+                  direction: DismissDirection.startToEnd,
+                  dismissThresholds: const {DismissDirection.startToEnd: 0.3},
+                  background: Container(
+                    alignment: Alignment.centerLeft,
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 4,
+                    ),
+                    padding: const EdgeInsets.only(left: 18),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Colors.red,
+                      size: 28,
+                    ),
+                  ),
+                  onDismissed: (_) {
+                    unawaited(removeSongFromPlaylist(path));
+                  },
+                  child: _buildSongRow(song: song, isDesktop: isDesktop),
+                );
               },
               childCount: availablePaths.length,
               addAutomaticKeepAlives: false,
@@ -1961,10 +1997,43 @@ class LibraryScreenState extends State<LibraryScreen>
         },
       );
     } else {
+      // En la pestaña de favoritos permitimos deslizar para quitar.
+      final allowSwipeToRemove = _selectedTab == _LibraryTab.favorites;
+
       list = SliverList(
         delegate: SliverChildBuilderDelegate(
           (context, index) {
-            return _buildSongRow(song: songs[index], isDesktop: isDesktop);
+            final song = songs[index];
+
+            if (!allowSwipeToRemove) {
+              return _buildSongRow(song: song, isDesktop: isDesktop);
+            }
+
+            final key = song.filePath ?? '${song.title}_${song.artist}_$index';
+
+            return Dismissible(
+              key: ValueKey<String>('favorite_remove_$key'),
+              direction: DismissDirection.startToEnd,
+              dismissThresholds: const {DismissDirection.startToEnd: 0.3},
+              background: Container(
+                alignment: Alignment.centerLeft,
+                margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                padding: const EdgeInsets.only(left: 18),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.red,
+                  size: 28,
+                ),
+              ),
+              onDismissed: (_) {
+                unawaited(_scanner.setFavorite(song, false));
+              },
+              child: _buildSongRow(song: song, isDesktop: isDesktop),
+            );
           },
 
           childCount: songs.length,
