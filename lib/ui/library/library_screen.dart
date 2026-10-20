@@ -149,6 +149,53 @@ class LibraryScreenState extends State<LibraryScreen>
     }
   }
 
+  /// [CONECTADO] Abre directamente el detalle de un artista/álbum/podcast
+  /// desde fuera de la biblioteca (p. ej. desde Buscar).
+  ///
+  /// - Podcast: `title` es el nombre del podcast (se guarda en
+  ///   `_openedPodcast`).
+  /// - Álbum:   `title` es el nombre del álbum y `artist` su artista.
+  /// - Artista: `title` es el nombre del artista.
+  void openDetailFromExternal({
+    required String title,
+    required String? artist,
+    required String? album,
+    required bool isPodcast,
+  }) {
+    _savedScrollOffset = 0;
+
+    _navigate(() {
+      if (isPodcast) {
+        _selectedTab = _LibraryTab.podcasts;
+        _openedPodcast = title;
+        _openedArtist = null;
+        _openedAlbum = null;
+        _openedAlbumArtist = null;
+        _openedPlaylistId = null;
+        _reorderingPlaylist = false;
+        _reorderingFavorites = false;
+      } else if (album != null) {
+        _selectedTab = _LibraryTab.albums;
+        _openedAlbum = album;
+        _openedAlbumArtist = _isUnknownAlbum(album) ? null : artist;
+        _openedArtist = null;
+        _openedPodcast = null;
+        _openedPlaylistId = null;
+        _reorderingPlaylist = false;
+        _reorderingFavorites = false;
+      } else {
+        _selectedTab = _LibraryTab.artists;
+        _openedArtist = title;
+        _openedAlbum = null;
+        _openedAlbumArtist = null;
+        _openedPodcast = null;
+        _openedPlaylistId = null;
+        _reorderingPlaylist = false;
+        _reorderingFavorites = false;
+      }
+    }, scrollTo: 0);
+  }
+
   Future<void> _addSongsToQueue(List<Song> songs) async {
     if (songs.isEmpty) return;
 
@@ -279,10 +326,6 @@ class LibraryScreenState extends State<LibraryScreen>
   /// 1) El más reciente empezado y no terminado.
   /// 2) Si no hay, el siguiente al último episodio terminado en el orden
   ///    de [episodes].
-  /// 3) Si no aplica ninguno, `null`.
-  /// Devuelve el episodio en el que debe reanudarse:
-  /// 1) El más reciente empezado y no terminado.
-  /// 2) Si no hay, el siguiente en la lista al último episodio terminado.
   /// 3) Si no aplica ninguno, `null`.
   Song? _resumeEpisode(List<Song> episodes) {
     if (episodes.isEmpty) return null;

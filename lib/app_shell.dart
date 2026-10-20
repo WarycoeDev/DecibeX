@@ -80,7 +80,36 @@ class _AppShellState extends State<AppShell> {
   late final List<Widget> _screens = [
     const HomeScreen(),
     LibraryScreen(key: _libraryKey),
-    const SearchScreen(),
+    SearchScreen(
+      // [CONECTADO] Navega a Biblioteca y abre el detalle correspondiente
+      // (artista / álbum / podcast) según lo pulsado en Buscar.
+      onOpenDetail:
+          ({
+            required String title,
+            required String? artist,
+            required String? album,
+            required bool isPodcast,
+          }) async {
+            _selectPage(1);
+
+            // El PageView construye sus hijos de forma diferida: tras cambiar
+            // de página puede pasar algún frame antes de que LibraryScreen
+            // esté montado. Esperamos a que `currentState` exista.
+            for (int i = 0; i < 30; i++) {
+              await WidgetsBinding.instance.endOfFrame;
+              final state = _libraryKey.currentState;
+              if (state != null) {
+                state.openDetailFromExternal(
+                  title: title,
+                  artist: artist,
+                  album: album,
+                  isPodcast: isPodcast,
+                );
+                return;
+              }
+            }
+          },
+    ),
     const SettingsScreen(),
   ];
 
@@ -166,17 +195,14 @@ class _AppShellState extends State<AppShell> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      useSafeArea: false, // el PlayerScreen ya gestiona su propio SafeArea
+      useSafeArea: false,
       backgroundColor: AppTheme.surfaceVariant,
       barrierColor: Colors.black54,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius
-            .zero, // sin esquinas para que quede a ras del borde superior
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       clipBehavior: Clip.antiAlias,
       builder: (context) {
         return SizedBox(
-          height: MediaQuery.sizeOf(context).height, // pantalla completa
+          height: MediaQuery.sizeOf(context).height,
           child: const PlayerScreen(),
         );
       },
@@ -225,13 +251,9 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  /// Detiene la música, limpia la cola y cierra el miniplayer.
-  /// Se usa tanto con el botón X como con el gesto de deslizar lateralmente.
   void _closeMiniPlayer() {
     PlaybackService.instance.stop();
     PlaybackQueue.instance.clear();
-
-    // La próxima canción vuelve a mostrarse expandida.
     _setMiniPlayerMinimized(false);
   }
 
@@ -245,6 +267,8 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final isDesktop = _isDesktop(context);
 
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+
     return PopScope<Object?>(
       canPop: _selectedIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
@@ -254,84 +278,74 @@ class _AppShellState extends State<AppShell> {
       },
       child: Scaffold(
         body: SafeArea(
-          child: Stack(
-            children: [
-              Column(
-                children: [
-                  _buildTitleBar(context),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        if (isDesktop) _buildSidebar(),
-                        Expanded(
-                          child: PageView(
-                            controller: _pageController,
-                            physics: const NeverScrollableScrollPhysics(),
-                            onPageChanged: (index) {
-                              if (_selectedIndex != index) {
-                                setState(() {
-                                  _selectedIndex = index;
-                                });
-                              }
-                            },
-                            children: _screens,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    _buildTitleBar(context),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          if (isDesktop) _buildSidebar(),
+                          Expanded(
+                            child: PageView(
+                              controller: _pageController,
+                              physics: const NeverScrollableScrollPhysics(),
+                              onPageChanged: (index) {
+                                if (_selectedIndex != index) {
+                                  setState(() {
+                                    _selectedIndex = index;
+                                  });
+                                }
+                              },
+                              children: _screens,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
+                    if (!isDesktop && !keyboardVisible)
+                      _buildBottomNavigation(),
+                  ],
+                ),
+
+                if (!isDesktop && !keyboardVisible)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: _mobileMiniPlayerBottom,
+                    child: _buildMobileMiniPlayer(),
                   ),
-                  if (!isDesktop) _buildBottomNavigation(),
-                ],
-              ),
 
-              // MiniPlayer móvil flotante.
-              // No ocupa espacio en el layout y el contenido pasa por debajo.
-              // En Android responde a gestos:
-              //  - deslizar a los lados: cierra y detiene la música
-              //  - deslizar hacia abajo: se esconde detrás de la barra de
-              //    navegación sin detener la música
-              if (!isDesktop)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: _mobileMiniPlayerBottom,
-                  child: _buildMobileMiniPlayer(),
-                ),
+                if (!isDesktop && _isAndroid && !keyboardVisible)
+                  Positioned(
+                    left: 0,
+                    bottom: _mobileMiniPlayerBottom,
+                    child: _buildRestoreMiniPlayerButton(),
+                  ),
 
-              // Botón (chevron hacia arriba) para reabrir el miniplayer minimizado.
-              // Sin `bottom` extra: el recorte y el margen los maneja el propio botón.
-              if (!isDesktop && _isAndroid)
-                Positioned(
-                  left: 0,
-                  bottom: _mobileMiniPlayerBottom,
-                  child: _buildRestoreMiniPlayerButton(),
-                ),
-
-              // MiniPlayer de escritorio sin cambios.
-              if (isDesktop)
-                Positioned(
-                  right: 16,
-                  bottom: 16,
-                  child: _buildMiniPlayer(true),
-                ),
-            ],
+                if (isDesktop)
+                  Positioned(
+                    right: 16,
+                    bottom: 16,
+                    child: _buildMiniPlayer(true),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// Envuelve el miniplayer móvil con:
-  ///  - un recorte en su borde inferior (justo donde empieza la barra de
-  ///    navegación), de modo que al deslizarse hacia abajo parezca ir detrás
-  ///  - el gesto de deslizar (solo Android)
   Widget _buildMobileMiniPlayer() {
     return ClipRect(
       child: IgnorePointer(
         ignoring: _miniPlayerMinimized,
         child: AnimatedSlide(
-          // 1.1 = un poco más que su propia altura, para que quede
-          // completamente oculto detrás de la barra.
           offset: _miniPlayerMinimized ? const Offset(0, 1.1) : Offset.zero,
           duration: _miniPlayerMinimizeInstant
               ? Duration.zero
@@ -350,9 +364,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  /// Botón circular con flecha sin palito apuntando hacia arriba.
-  /// Solo es visible cuando hay canción y el miniplayer está minimizado.
-  /// Sale desde detrás de la barra de navegación.
   Widget _buildRestoreMiniPlayerButton() {
     return AnimatedBuilder(
       animation: PlaybackService.instance,
@@ -368,7 +379,6 @@ class _AppShellState extends State<AppShell> {
               offset: visible ? Offset.zero : const Offset(0, 1.2),
               duration: _miniPlayerMinimizeDuration,
               curve: visible ? Curves.easeOutCubic : Curves.easeInCubic,
-              // El padding da espacio a la sombra para que el recorte no la corte.
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 14, 16, 6),
                 child: Material(
@@ -714,18 +724,14 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
   static const Duration _settleDuration = Duration(milliseconds: 220);
   static const Duration _dismissDuration = Duration(milliseconds: 200);
 
-  // Tiempo que se espera antes de devolver el offset a cero, para que el
-  // miniplayer ya no sea visible cuando vuelva a su posición original.
   static const Duration _dismissResetDelay = Duration(milliseconds: 320);
 
-  // Duración del recorrido final hacia abajo (detrás de la barra).
   static const Duration _minimizeDuration = Duration(milliseconds: 180);
 
-  // Umbrales.
-  static const double _dismissDistanceFactor = 0.35; // % del ancho de pantalla
-  static const double _dismissVelocity = 700; // px/s
-  static const double _minimizeDistance = 36; // px
-  static const double _minimizeVelocity = 500; // px/s
+  static const double _dismissDistanceFactor = 0.35;
+  static const double _dismissVelocity = 700;
+  static const double _minimizeDistance = 36;
+  static const double _minimizeVelocity = 500;
 
   late final AnimationController _controller = AnimationController(
     vsync: this,
@@ -736,7 +742,6 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
   Offset _from = Offset.zero;
   Offset _to = Offset.zero;
 
-  // Mientras hay una animación de salida/regreso se ignoran nuevos gestos.
   bool _busy = false;
 
   @override
@@ -782,8 +787,6 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     _busy = false;
   }
 
-  // ---------- Horizontal: cerrar ----------
-
   void _onHorizontalUpdate(DragUpdateDetails details) {
     if (_busy) return;
 
@@ -816,12 +819,9 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     _resetAfter(_dismissResetDelay);
   }
 
-  // ---------- Vertical: minimizar ----------
-
   void _onVerticalUpdate(DragUpdateDetails details) {
     if (_busy) return;
 
-    // Solo se permite arrastrar hacia abajo.
     final dy = _offset.dy + details.delta.dy;
 
     setState(() {
@@ -837,15 +837,11 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     if (_offset.dy > _minimizeDistance || velocity > _minimizeVelocity) {
       _busy = true;
 
-      // Continúa el movimiento desde donde se soltó el dedo, sin pausa,
-      // hasta que el miniplayer queda fuera de pantalla (detrás de la barra).
       final height = context.size?.height ?? 120;
       await _animateTo(Offset(0, height), duration: _minimizeDuration);
 
       if (!mounted) return;
 
-      // El padre fija el estado minimizado sin animar (ya está oculto) y el
-      // offset se reinicia en el mismo frame, así que no hay parpadeo.
       widget.onMinimize();
 
       setState(() {
@@ -858,8 +854,6 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     await _settleBack();
   }
 
-  // La opacidad solo cambia en el deslizamiento lateral; al arrastrar hacia
-  // abajo el miniplayer se mantiene sólido mientras se esconde.
   double _opacityFor(double width) {
     final horizontal = (_offset.dx.abs() / (width * 0.7))
         .clamp(0.0, 1.0)
