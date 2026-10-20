@@ -416,20 +416,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ],
                         ),
                       )
-                    : _DesktopQueueList(
-                        queue: queue,
-                        currentIndex: currentIndex,
-                        playback: playback,
-                        colors: colors,
-                        isCurrentQueueSong: _isCurrentQueueSong,
-                        artworkFallback: _queueArtworkFallback,
+                    : Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                        child: _DesktopQueueList(
+                          queue: queue,
+                          currentIndex: currentIndex,
+                          playback: playback,
+                          colors: colors,
+                          isCurrentQueueSong: _isCurrentQueueSong,
+                          artworkFallback: _queueArtworkFallback,
+                        ),
                       ),
               ),
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(
                   queue.length > 1
-                      ? 'La lista sigue la canción actual automáticamente'
+                      ? 'Arrastra el icono para cambiar el orden'
                       : 'Pulsa una canción para reproducirla',
                   style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                 ),
@@ -990,7 +993,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               builder: (context, _) {
                 final playback = PlaybackService.instance;
                 final queue = PlaybackQueue.instance.songs;
-                final currentSong = playback.currentSong;
                 final colors = Theme.of(context).colorScheme;
                 final size = MediaQuery.sizeOf(context);
 
@@ -1061,298 +1063,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ],
                                   ),
                                 )
-                              : ReorderableListView.builder(
-                                  key: const PageStorageKey<String>(
-                                    'playback_queue_table',
+                              : Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    8,
+                                    12,
+                                    8,
                                   ),
-                                  scrollController: scrollController,
-                                  padding: const EdgeInsets.all(12),
-                                  itemCount: queue.length,
-                                  buildDefaultDragHandles: false,
-                                  onReorder: (oldIndex, newIndex) {
-                                    if (queue.length < 2 ||
-                                        oldIndex == newIndex) {
-                                      return;
-                                    }
-
-                                    playback.reorderPlaybackQueue(
-                                      oldIndex,
-                                      newIndex,
-                                    );
-                                  },
-                                  proxyDecorator: (child, index, animation) {
-                                    return AnimatedBuilder(
-                                      animation: animation,
-                                      child: child,
-                                      builder: (context, child) {
-                                        final progress = Curves.easeOutCubic
-                                            .transform(
-                                              animation.value.clamp(0.0, 1.0),
-                                            );
-
-                                        return Material(
-                                          color: Colors.transparent,
-                                          elevation: 6 * progress,
-                                          shadowColor: Colors.black.withValues(
-                                            alpha: 0.22 * progress,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            18 * progress,
-                                          ),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: child,
-                                        );
-                                      },
-                                    );
-                                  },
-
-                                  itemBuilder: (context, index) {
-                                    final item = queue[index];
-                                    final selected = _isCurrentQueueSong(
-                                      currentSong,
-                                      item,
-                                    );
-                                    final artworkPath = item.artworkPath;
-                                    final isFirst = index == 0;
-                                    final isLast = index == queue.length - 1;
-
-                                    final radius = BorderRadius.vertical(
-                                      top: isFirst
-                                          ? const Radius.circular(18)
-                                          : Radius.zero,
-                                      bottom: isLast
-                                          ? const Radius.circular(18)
-                                          : Radius.zero,
-                                    );
-
-                                    final itemKey =
-                                        item.filePath ??
-                                        '${item.title}_${item.artist}';
-
-                                    return Dismissible(
-                                      key: ValueKey<String>('dialog_$itemKey'),
-                                      direction: selected
-                                          ? DismissDirection.none
-                                          : DismissDirection.startToEnd,
-                                      dismissThresholds: const {
-                                        DismissDirection.startToEnd: 0.3,
-                                      },
-                                      background: Container(
-                                        alignment: Alignment.centerLeft,
-                                        padding: const EdgeInsets.only(
-                                          left: 24,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.red.withValues(
-                                            alpha: 0.15,
-                                          ),
-                                          borderRadius: BorderRadius.vertical(
-                                            top: isFirst
-                                                ? const Radius.circular(18)
-                                                : Radius.zero,
-                                            bottom: isLast
-                                                ? const Radius.circular(18)
-                                                : Radius.zero,
-                                          ),
-                                        ),
-                                        child: const Icon(
-                                          Icons.delete_outline_rounded,
-                                          color: Colors.red,
-                                          size: 28,
-                                        ),
-                                      ),
-                                      onDismissed: (_) {
-                                        unawaited(
-                                          playback.removeFromPlaybackQueue(
-                                            item,
-                                          ),
-                                        );
-                                      },
-                                      child: AnimatedContainer(
-                                        key: ValueKey<String>(itemKey),
-                                        duration: const Duration(
-                                          milliseconds: 280,
-                                        ),
-                                        curve: Curves.easeInOutCubic,
-                                        clipBehavior: Clip.antiAlias,
-                                        decoration: BoxDecoration(
-                                          color: selected
-                                              ? colors.primary.withValues(
-                                                  alpha: 0.10,
-                                                )
-                                              : AppTheme.surface,
-                                          borderRadius: radius,
-                                          border: Border(
-                                            left: BorderSide(
-                                              color: AppTheme.surfaceVariant,
-                                              width: 0.7,
-                                            ),
-                                            right: BorderSide(
-                                              color: AppTheme.surfaceVariant,
-                                              width: 0.7,
-                                            ),
-                                            top: isFirst
-                                                ? BorderSide(
-                                                    color:
-                                                        AppTheme.surfaceVariant,
-                                                    width: 0.7,
-                                                  )
-                                                : BorderSide.none,
-                                            bottom: BorderSide(
-                                              color: AppTheme.surfaceVariant,
-                                              width: 0.7,
-                                            ),
-                                          ),
-                                        ),
-                                        child: Material(
-                                          color: Colors.transparent,
-                                          child: InkWell(
-                                            onTap: selected
-                                                ? null
-                                                : () async {
-                                                    await playback
-                                                        .playSongFromQueue(
-                                                          item,
-                                                        );
-                                                  },
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 12,
-                                                  ),
-                                              child: Row(
-                                                children: [
-                                                  ClipRRect(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          12,
-                                                        ),
-                                                    child: SizedBox(
-                                                      width: 48,
-                                                      height: 48,
-                                                      child: Stack(
-                                                        fit: StackFit.expand,
-                                                        children: [
-                                                          if (artworkPath !=
-                                                                  null &&
-                                                              artworkPath
-                                                                  .isNotEmpty)
-                                                            Image.file(
-                                                              File(artworkPath),
-                                                              fit: BoxFit.cover,
-                                                              cacheWidth: 144,
-                                                              cacheHeight: 144,
-                                                              errorBuilder:
-                                                                  (
-                                                                    context,
-                                                                    error,
-                                                                    stackTrace,
-                                                                  ) {
-                                                                    return _queueArtworkFallback(
-                                                                      colors,
-                                                                    );
-                                                                  },
-                                                            )
-                                                          else
-                                                            _queueArtworkFallback(
-                                                              colors,
-                                                            ),
-                                                          if (selected &&
-                                                              playback
-                                                                  .isPlaying)
-                                                            Container(
-                                                              color: Colors
-                                                                  .black
-                                                                  .withValues(
-                                                                    alpha: 0.45,
-                                                                  ),
-                                                              alignment:
-                                                                  Alignment
-                                                                      .center,
-                                                              child: Icon(
-                                                                Icons
-                                                                    .equalizer_rounded,
-                                                                color: colors
-                                                                    .primary,
-                                                                size: 26,
-                                                              ),
-                                                            ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 14),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          item.title,
-                                                          maxLines: 1,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                          style: TextStyle(
-                                                            fontWeight: selected
-                                                                ? FontWeight
-                                                                      .bold
-                                                                : FontWeight
-                                                                      .w600,
-                                                            color: selected
-                                                                ? colors.primary
-                                                                : null,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(
-                                                          height: 4,
-                                                        ),
-                                                        Text(
-                                                          item.artist.isEmpty
-                                                              ? 'Artista desconocido'
-                                                              : item.artist,
-                                                          maxLines: 1,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                          style: TextStyle(
-                                                            fontSize: 12,
-                                                            color: AppTheme
-                                                                .textSecondary,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                  ReorderableDragStartListener(
-                                                    index: index,
-                                                    child: Padding(
-                                                      padding:
-                                                          const EdgeInsets.only(
-                                                            left: 8,
-                                                            top: 8,
-                                                            bottom: 8,
-                                                          ),
-                                                      child: Icon(
-                                                        Icons
-                                                            .drag_handle_rounded,
-                                                        color: AppTheme
-                                                            .textSecondary
-                                                            .withValues(
-                                                              alpha: 0.7,
-                                                            ),
-                                                        size: 23,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
+                                  child: _QueueListView(
+                                    queue: queue,
+                                    playback: playback,
+                                    colors: colors,
+                                    scrollController: scrollController,
+                                    isCurrentQueueSong: _isCurrentQueueSong,
+                                    artworkFallback: _queueArtworkFallback,
+                                  ),
                                 ),
                         ),
                         Padding(
@@ -1486,9 +1211,10 @@ class _QueueScrollHost extends StatefulWidget {
 
   const _QueueScrollHost({required this.initialIndex, required this.builder});
 
-  static const double itemHeight = 72.7;
-  static const double listPadding = 12;
-  static const double firstItemTopBorder = 0.7;
+  // Alto real de cada fila: 12 + 48 + 12.
+  static const double itemHeight = 72;
+  static const double listPadding = 0;
+  static const double firstItemTopBorder = 0;
 
   @override
   State<_QueueScrollHost> createState() => _QueueScrollHostState();
@@ -1827,6 +1553,218 @@ class _AnimatedPlayPauseButtonState extends State<_AnimatedPlayPauseButton>
   }
 }
 
+/// Lista de cola compartida por el panel de PC y el diálogo de Android.
+/// Aquí vive todo el aspecto y comportamiento de las filas.
+
+class _QueueListView extends StatelessWidget {
+  final List<Song> queue;
+  final PlaybackService playback;
+  final ColorScheme colors;
+  final ScrollController scrollController;
+  final bool Function(dynamic, dynamic) isCurrentQueueSong;
+  final Widget Function(ColorScheme) artworkFallback;
+  final VoidCallback? onReordered;
+
+  const _QueueListView({
+    required this.queue,
+    required this.playback,
+    required this.colors,
+    required this.scrollController,
+    required this.isCurrentQueueSong,
+    required this.artworkFallback,
+    this.onReordered,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final currentSong = playback.currentSong;
+
+    return _QueueListContainer(
+      child: ReorderableListView.builder(
+        key: const PageStorageKey<String>('playback_queue_table'),
+        scrollController: scrollController,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: queue.length,
+        buildDefaultDragHandles: false,
+        onReorder: (oldIndex, newIndex) {
+          if (queue.length < 2 || oldIndex == newIndex) return;
+
+          playback.reorderPlaybackQueue(oldIndex, newIndex);
+          onReordered?.call();
+        },
+        proxyDecorator: (child, index, animation) {
+          return AnimatedBuilder(
+            animation: animation,
+            child: child,
+            builder: (context, child) {
+              final progress = Curves.easeOutCubic.transform(
+                animation.value.clamp(0.0, 1.0),
+              );
+
+              return Material(
+                color: AppTheme.surface,
+                elevation: 4 * progress,
+                shadowColor: Colors.black.withValues(alpha: 0.18 * progress),
+                borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
+                child: child,
+              );
+            },
+          );
+        },
+        itemBuilder: (context, index) {
+          final item = queue[index];
+          final selected = isCurrentQueueSong(currentSong, item);
+          final artworkPath = item.artworkPath;
+          final itemKey = item.filePath ?? '${item.title}_${item.artist}';
+
+          return Dismissible(
+            key: ValueKey<String>('dismiss_$itemKey'),
+            direction: selected
+                ? DismissDirection.none
+                : DismissDirection.startToEnd,
+            dismissThresholds: const {DismissDirection.startToEnd: 0.3},
+            background: Container(
+              alignment: Alignment.centerLeft,
+              margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+              padding: const EdgeInsets.only(left: 18),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.red,
+                size: 28,
+              ),
+            ),
+            onDismissed: (_) {
+              unawaited(playback.removeFromPlaybackQueue(item));
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Material(
+                key: ValueKey<String>('row_$itemKey'),
+                type: MaterialType.card,
+                color: selected
+                    ? colors.primary.withValues(alpha: 0.10)
+                    : AppTheme.surface,
+                elevation: selected ? 2 : 0,
+                shadowColor: Colors.black.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: selected
+                      ? null
+                      : () async {
+                          await playback.playSongFromQueue(item);
+                        },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: SizedBox(
+                            width: 48,
+                            height: 48,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                if (artworkPath != null &&
+                                    artworkPath.isNotEmpty)
+                                  Image.file(
+                                    File(artworkPath),
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 144,
+                                    cacheHeight: 144,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return artworkFallback(colors);
+                                    },
+                                  )
+                                else
+                                  artworkFallback(colors),
+                                if (selected && playback.isPlaying)
+                                  Container(
+                                    color: Colors.black.withValues(alpha: 0.45),
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      Icons.equalizer_rounded,
+                                      color: colors.primary,
+                                      size: 26,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: selected
+                                      ? FontWeight.bold
+                                      : FontWeight.w600,
+                                  color: selected ? colors.primary : null,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                item.artist.isEmpty
+                                    ? 'Artista desconocido'
+                                    : item.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ReorderableDragStartListener(
+                          index: index,
+                          child: Padding(
+                            padding: const EdgeInsets.only(
+                              left: 8,
+                              top: 8,
+                              bottom: 8,
+                            ),
+                            child: Icon(
+                              Icons.drag_handle_rounded,
+                              color: AppTheme.textSecondary.withValues(
+                                alpha: 0.7,
+                              ),
+                              size: 23,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Panel de PC: usa la misma lista que Android y añade el seguimiento
+/// automático de la canción actual.
 class _DesktopQueueList extends StatefulWidget {
   final List<Song> queue;
   final int currentIndex;
@@ -1850,16 +1788,13 @@ class _DesktopQueueList extends StatefulWidget {
 
 class _DesktopQueueListState extends State<_DesktopQueueList> {
   final ScrollController _controller = ScrollController();
-  int _lastIndex = -1;
-  bool _pendingFollow = false;
 
-  static const double _itemExtent = 72.7;
+  // Alto real de cada fila: 12 + 48 + 12.
+  static const double _itemExtent = 72;
 
   @override
   void initState() {
     super.initState();
-    _lastIndex = widget.currentIndex;
-    _pendingFollow = widget.currentIndex >= 0;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _followCurrentSong(animated: false);
@@ -1872,9 +1807,6 @@ class _DesktopQueueListState extends State<_DesktopQueueList> {
 
     if (oldWidget.currentIndex != widget.currentIndex ||
         oldWidget.queue.length != widget.queue.length) {
-      _lastIndex = widget.currentIndex;
-      _pendingFollow = widget.currentIndex >= 0;
-
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _followCurrentSong();
       });
@@ -1896,10 +1828,7 @@ class _DesktopQueueListState extends State<_DesktopQueueList> {
                 _itemExtent / 2)
             .clamp(0.0, position.maxScrollExtent);
 
-    if ((position.pixels - target).abs() < 12) {
-      _pendingFollow = false;
-      return;
-    }
+    if ((position.pixels - target).abs() < 12) return;
 
     if (animated) {
       _controller.animateTo(
@@ -1910,8 +1839,6 @@ class _DesktopQueueListState extends State<_DesktopQueueList> {
     } else {
       _controller.jumpTo(target);
     }
-
-    _pendingFollow = false;
   }
 
   @override
@@ -1922,197 +1849,37 @@ class _DesktopQueueListState extends State<_DesktopQueueList> {
 
   @override
   Widget build(BuildContext context) {
-    return ReorderableListView.builder(
+    return _QueueListView(
+      queue: widget.queue,
+      playback: widget.playback,
+      colors: widget.colors,
       scrollController: _controller,
-      padding: const EdgeInsets.all(12),
-      itemCount: widget.queue.length,
-      buildDefaultDragHandles: false,
-      onReorder: (oldIndex, newIndex) {
-        if (widget.queue.length < 2 || oldIndex == newIndex) {
-          return;
-        }
-
-        widget.playback.reorderPlaybackQueue(oldIndex, newIndex);
-
+      isCurrentQueueSong: widget.isCurrentQueueSong,
+      artworkFallback: widget.artworkFallback,
+      onReordered: () {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _followCurrentSong(animated: false);
         });
       },
-      proxyDecorator: (child, index, animation) {
-        return Material(
-          color: Colors.transparent,
-          elevation: 6,
-          borderRadius: BorderRadius.circular(12),
-          clipBehavior: Clip.antiAlias,
-          child: child,
-        );
-      },
-      itemBuilder: (context, index) {
-        final item = widget.queue[index];
-        final selected = widget.isCurrentQueueSong(
-          widget.playback.currentSong,
-          item,
-        );
+    );
+  }
+}
 
-        final artworkPath = item.artworkPath;
-        final isFirst = index == 0;
-        final isLast = index == widget.queue.length - 1;
-        final itemKey = item.filePath ?? '${item.title}_${item.artist}';
+class _QueueListContainer extends StatelessWidget {
+  final Widget child;
 
-        return Dismissible(
-          key: ValueKey<String>('desktop_$itemKey'),
-          direction: selected
-              ? DismissDirection.none
-              : DismissDirection.startToEnd,
-          dismissThresholds: const {DismissDirection.startToEnd: 0.3},
-          background: Container(
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.only(left: 24),
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.vertical(
-                top: isFirst ? const Radius.circular(18) : Radius.zero,
-                bottom: isLast ? const Radius.circular(18) : Radius.zero,
-              ),
-            ),
-            child: const Icon(
-              Icons.delete_outline_rounded,
-              color: Colors.red,
-              size: 28,
-            ),
-          ),
-          onDismissed: (_) {
-            unawaited(widget.playback.removeFromPlaybackQueue(item));
-          },
-          child: AnimatedContainer(
-            key: ValueKey<String>(itemKey),
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeInOutCubic,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: selected
-                  ? widget.colors.primary.withValues(alpha: 0.10)
-                  : AppTheme.surface,
-              borderRadius: BorderRadius.vertical(
-                top: isFirst ? const Radius.circular(18) : Radius.zero,
-                bottom: isLast ? const Radius.circular(18) : Radius.zero,
-              ),
-              border: Border(
-                left: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-                right: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-                top: isFirst
-                    ? BorderSide(color: AppTheme.surfaceVariant, width: 0.7)
-                    : BorderSide.none,
-                bottom: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-              ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: selected
-                    ? null
-                    : () async {
-                        await widget.playback.playSongFromQueue(item);
-                      },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: SizedBox(
-                          width: 48,
-                          height: 48,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              if (artworkPath != null && artworkPath.isNotEmpty)
-                                Image.file(
-                                  File(artworkPath),
-                                  fit: BoxFit.cover,
-                                  cacheWidth: 144,
-                                  cacheHeight: 144,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return widget.artworkFallback(
-                                      widget.colors,
-                                    );
-                                  },
-                                )
-                              else
-                                widget.artworkFallback(widget.colors),
-                              if (selected && widget.playback.isPlaying)
-                                Container(
-                                  color: Colors.black.withValues(alpha: 0.45),
-                                  alignment: Alignment.center,
-                                  child: Icon(
-                                    Icons.equalizer_rounded,
-                                    color: widget.colors.primary,
-                                    size: 26,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: selected
-                                    ? FontWeight.bold
-                                    : FontWeight.w600,
-                                color: selected ? widget.colors.primary : null,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              item.artist.isEmpty
-                                  ? 'Artista desconocido'
-                                  : item.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ReorderableDragStartListener(
-                        index: index,
-                        child: Padding(
-                          padding: const EdgeInsets.only(
-                            left: 8,
-                            top: 8,
-                            bottom: 8,
-                          ),
-                          child: Icon(
-                            Icons.drag_handle_rounded,
-                            color: AppTheme.textSecondary.withValues(
-                              alpha: 0.7,
-                            ),
-                            size: 23,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+  const _QueueListContainer({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
     );
   }
 }

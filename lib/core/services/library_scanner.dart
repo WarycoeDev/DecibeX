@@ -40,6 +40,7 @@ class LibraryScanner extends ChangeNotifier {
   final Map<String, Map<String, dynamic>> _index = {};
   final List<StreamSubscription<FileSystemEvent>> _watchers = [];
   final LinkedHashSet<String> _favoritePaths = LinkedHashSet<String>();
+  final List<String> _favoriteOrderPaths = [];
 
   List<Song> _songs = [];
   List<String> _directories = [];
@@ -237,10 +238,25 @@ class LibraryScanner extends ChangeNotifier {
             ..clear()
             ..addAll(favorites.whereType<String>());
         }
+
+        final order = decoded['favoriteOrder'];
+        if (order is List) {
+          _favoriteOrderPaths
+            ..clear()
+            ..addAll(order.whereType<String>());
+        } else {
+          _favoriteOrderPaths
+            ..clear()
+            ..addAll(_favoritePaths);
+        }
       } else if (decoded is List) {
         _favoritePaths
           ..clear()
           ..addAll(decoded.whereType<String>());
+
+        _favoriteOrderPaths
+          ..clear()
+          ..addAll(_favoritePaths);
       }
     } catch (e) {
       debugPrint('[LibraryScanner] No se pudieron cargar los favoritos: $e');
@@ -281,6 +297,7 @@ class LibraryScanner extends ChangeNotifier {
 
   Future<void> _saveFavorites() {
     final snapshot = List<String>.from(_favoritePaths);
+    final orderSnapshot = List<String>.from(_favoriteOrderPaths);
 
     final operation = _favoritesWriteQueue.then((_) async {
       if (_disposed) return;
@@ -289,7 +306,11 @@ class LibraryScanner extends ChangeNotifier {
       if (_disposed) return;
 
       final temporaryFile = File('${file.path}.tmp');
-      final contents = jsonEncode({'favorites': snapshot});
+
+      final contents = jsonEncode({
+        'favorites': snapshot,
+        'favoriteOrder': orderSnapshot,
+      });
 
       await temporaryFile.writeAsString(contents, flush: true);
       if (_disposed) return;
@@ -790,6 +811,56 @@ class LibraryScanner extends ChangeNotifier {
     _notifyIfAlive();
   }
 
+  List<Song> orderFavorites(Iterable<Song> songs) {
+    final favorites = songs.where((song) => song.favorite).toList();
+    final positions = <String, int>{};
+
+    for (var i = 0; i < _favoriteOrderPaths.length; i++) {
+      positions[_favoriteOrderPaths[i]] = i;
+    }
+
+    favorites.sort((a, b) {
+      final pathA = a.filePath ?? '';
+      final pathB = b.filePath ?? '';
+      final positionA = positions[pathA];
+      final positionB = positions[pathB];
+
+      if (positionA != null && positionB != null) {
+        return positionA.compareTo(positionB);
+      }
+      if (positionA != null) return -1;
+      if (positionB != null) return 1;
+
+      final byTitle = _sortKey(a).compareTo(_sortKey(b));
+      return byTitle != 0 ? byTitle : pathA.compareTo(pathB);
+    });
+
+    return favorites;
+  }
+
+  Future<void> setFavoriteOrder(List<Song> songs) async {
+    if (_disposed) return;
+
+    final orderedPaths = songs
+        .map((song) => song.filePath)
+        .whereType<String>()
+        .where((path) => _favoritePaths.contains(path))
+        .toList();
+
+    for (final path in _favoritePaths) {
+      if (!orderedPaths.contains(path)) {
+        orderedPaths.add(path);
+      }
+    }
+
+    _favoriteOrderPaths
+      ..clear()
+      ..addAll(orderedPaths);
+
+    _notifyIfAlive();
+    await _saveFavorites();
+  }
+
   Future<void> setFavorite(Song song, bool favorite) async {
     if (_disposed) return;
 
@@ -799,10 +870,16 @@ class LibraryScanner extends ChangeNotifier {
     final wasFavorite = _favoritePaths.contains(path);
     if (wasFavorite == favorite) return;
 
+    final previousOrder = List<String>.from(_favoriteOrderPaths);
+
     if (favorite) {
       _favoritePaths.add(path);
+      if (!_favoriteOrderPaths.contains(path)) {
+        _favoriteOrderPaths.add(path);
+      }
     } else {
       _favoritePaths.remove(path);
+      _favoriteOrderPaths.remove(path);
     }
 
     _publishSongs();
@@ -817,6 +894,10 @@ class LibraryScanner extends ChangeNotifier {
       } else {
         _favoritePaths.remove(path);
       }
+
+      _favoriteOrderPaths
+        ..clear()
+        ..addAll(previousOrder);
 
       _publishSongs();
       error = 'No se pudo guardar el favorito: $e';

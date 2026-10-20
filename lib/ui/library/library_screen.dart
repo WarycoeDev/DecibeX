@@ -52,6 +52,7 @@ class LibraryScreenState extends State<LibraryScreen>
   bool _artistsGridMode = false;
   bool _albumsGridMode = false;
   bool _podcastsGridMode = false;
+  bool _reorderingFavorites = false;
   bool _viewModesLoaded = false;
   bool _savingViewModes = false;
   bool _saveViewModesAgain = false;
@@ -146,7 +147,6 @@ class LibraryScreenState extends State<LibraryScreen>
             _artistsGridMode = decoded['artistsGridMode'] is bool
                 ? decoded['artistsGridMode'] as bool
                 : false;
-
             _albumsGridMode = decoded['albumsGridMode'] is bool
                 ? decoded['albumsGridMode'] as bool
                 : false;
@@ -270,6 +270,7 @@ class LibraryScreenState extends State<LibraryScreen>
       _openedAlbum = null;
       _openedAlbumArtist = null;
       _openedPodcast = null;
+      _reorderingFavorites = false;
     }, scrollTo: 0);
   }
 
@@ -295,6 +296,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   void _openPodcast(Song song) {
     _savedScrollOffset = _currentScrollOffset;
+
     _navigate(() {
       _openedPodcast = song.album;
       _openedArtist = null;
@@ -340,12 +342,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
     if (_selectedTab == _LibraryTab.podcasts) {
       final unique = <String, Song>{};
+
       for (final song in podcastSongs) {
         final key = _isUnknownAlbum(song.album)
             ? '__unknown_podcast__'
             : song.album.trim();
         unique.putIfAbsent(key, () => song);
       }
+
       return unique.values.toList();
     }
 
@@ -366,20 +370,19 @@ class LibraryScreenState extends State<LibraryScreen>
     switch (_selectedTab) {
       case _LibraryTab.songs:
         return musicSongs;
-
       case _LibraryTab.podcasts:
         final unique = <String, Song>{};
+
         for (final song in podcastSongs) {
           final key = _isUnknownAlbum(song.album)
               ? '__unknown_podcast__'
               : song.album.trim();
           unique.putIfAbsent(key, () => song);
         }
+
         return unique.values.toList();
-
       case _LibraryTab.favorites:
-        return allSongs.where((song) => song.favorite).toList();
-
+        return _scanner.orderFavorites(allSongs.where((song) => song.favorite));
       case _LibraryTab.artists:
         final unique = <String, Song>{};
 
@@ -388,7 +391,6 @@ class LibraryScreenState extends State<LibraryScreen>
         }
 
         return unique.values.toList();
-
       case _LibraryTab.albums:
         final unique = <String, Song>{};
 
@@ -401,7 +403,6 @@ class LibraryScreenState extends State<LibraryScreen>
         }
 
         return unique.values.toList();
-
       case _LibraryTab.playlists:
         return [];
     }
@@ -452,19 +453,14 @@ class LibraryScreenState extends State<LibraryScreen>
     switch (_selectedTab) {
       case _LibraryTab.songs:
         return '${_scanner.songCount} canciones en tu colección';
-
       case _LibraryTab.podcasts:
         return '${songs.length} podcasts en tu colección';
-
       case _LibraryTab.playlists:
         return 'Tus listas de reproducción';
-
       case _LibraryTab.favorites:
         return '${songs.length} elementos favoritos';
-
       case _LibraryTab.artists:
         return '${songs.length} artistas en tu colección';
-
       case _LibraryTab.albums:
         return '${songs.length} álbumes en tu colección';
     }
@@ -682,6 +678,22 @@ class LibraryScreenState extends State<LibraryScreen>
             ],
           ),
         ),
+        if (_selectedTab == _LibraryTab.favorites && songs.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: _reorderingFavorites
+                ? 'Terminar de ordenar'
+                : 'Reordenar favoritos',
+            onPressed: () {
+              setState(() => _reorderingFavorites = !_reorderingFavorites);
+            },
+            icon: Icon(
+              _reorderingFavorites
+                  ? Icons.check_rounded
+                  : Icons.reorder_rounded,
+            ),
+          ),
+        ],
         if (_isCollectionTab) ...[
           const SizedBox(width: 12),
           _buildViewModeButtons(),
@@ -765,8 +777,6 @@ class LibraryScreenState extends State<LibraryScreen>
             ? Icons.person_outline_rounded
             : albumDetail
             ? Icons.album_outlined
-            : podcastDetail
-            ? Icons.podcasts_rounded
             : Icons.music_off_rounded,
         title: podcasts && !podcastDetail
             ? 'Todavía no hay podcasts'
@@ -778,8 +788,6 @@ class LibraryScreenState extends State<LibraryScreen>
             ? 'No hay canciones de este artista'
             : albumDetail
             ? 'No hay canciones de este álbum'
-            : podcastDetail
-            ? 'No hay episodios de este podcast'
             : 'Tu biblioteca está vacía',
         message: podcasts && !podcastDetail
             ? 'Agrega directorios en Configuración > Biblioteca > Podcasts y escanea tus archivos.'
@@ -787,8 +795,6 @@ class LibraryScreenState extends State<LibraryScreen>
             ? 'Los episodios aparecerán aquí cuando estén disponibles en tu biblioteca.'
             : favorites
             ? 'Marca canciones o episodios como favoritos para verlos aquí.'
-            : podcastDetail
-            ? 'Los episodios aparecerán aquí cuando estén disponibles en tu biblioteca.'
             : artistDetail || albumDetail
             ? 'Las canciones aparecerán aquí cuando estén disponibles en tu biblioteca.'
             : 'Agrega directorios en Configuración > Biblioteca y escanea tus archivos.',
@@ -823,19 +829,70 @@ class LibraryScreenState extends State<LibraryScreen>
             );
     }
 
-    return SliverList(
-      delegate: SliverChildBuilderDelegate(
-        (context, index) {
-          return _buildSongRow(
-            song: songs[index],
+    return _buildSongListContainer(
+      songs: songs,
+      isDesktop: isDesktop,
+      reordering: _selectedTab == _LibraryTab.favorites && _reorderingFavorites,
+    );
+  }
+
+  Widget _buildSongListContainer({
+    required List<Song> songs,
+    required bool isDesktop,
+    required bool reordering,
+  }) {
+    final Widget list;
+
+    if (reordering) {
+      list = SliverReorderableList(
+        itemCount: songs.length,
+        onReorder: (oldIndex, newIndex) {
+          if (newIndex > oldIndex) {
+            newIndex--;
+          }
+
+          if (oldIndex == newIndex) return;
+
+          final reordered = List<Song>.from(songs);
+          final song = reordered.removeAt(oldIndex);
+          reordered.insert(newIndex, song);
+
+          _scanner.setFavoriteOrder(reordered);
+        },
+        itemBuilder: (context, index) {
+          final song = songs[index];
+
+          return ReorderableDelayedDragStartListener(
+            key: ValueKey(song.filePath ?? '${song.title}-$index'),
             index: index,
-            total: songs.length,
-            isDesktop: isDesktop,
+            child: _buildSongRow(
+              song: song,
+              isDesktop: isDesktop,
+              showDragHandle: true,
+            ),
           );
         },
-        childCount: songs.length,
-        addAutomaticKeepAlives: false,
+      );
+    } else {
+      list = SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            return _buildSongRow(song: songs[index], isDesktop: isDesktop);
+          },
+          childCount: songs.length,
+          addAutomaticKeepAlives: false,
+          addRepaintBoundaries: true,
+        ),
+      );
+    }
+
+    return DecoratedSliver(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+        borderRadius: BorderRadius.circular(18),
       ),
+      sliver: list,
     );
   }
 
@@ -892,15 +949,9 @@ class LibraryScreenState extends State<LibraryScreen>
       delegate: SliverChildBuilderDelegate(
         (context, index) {
           final song = songs[index];
-          final isFirst = index == 0;
-          final isLast = index == songs.length - 1;
           final title = isArtist
               ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
               : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
-          final borderRadius = BorderRadius.vertical(
-            top: isFirst ? const Radius.circular(18) : Radius.zero,
-            bottom: isLast ? const Radius.circular(18) : Radius.zero,
-          );
 
           return _entry(
             index,
@@ -908,31 +959,18 @@ class LibraryScreenState extends State<LibraryScreen>
               child: Container(
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
-                  border: Border(
-                    left: BorderSide(
-                      color: AppTheme.surfaceVariant,
-                      width: 0.7,
-                    ),
-                    right: BorderSide(
-                      color: AppTheme.surfaceVariant,
-                      width: 0.7,
-                    ),
-                    top: isFirst
-                        ? BorderSide(color: AppTheme.surfaceVariant, width: 0.7)
-                        : BorderSide.none,
-                    bottom: BorderSide(
-                      color: AppTheme.surfaceVariant,
-                      width: 0.7,
-                    ),
+                  border: Border.all(
+                    color: AppTheme.surfaceVariant,
+                    width: 0.7,
                   ),
-                  borderRadius: borderRadius,
+                  borderRadius: BorderRadius.circular(16),
                 ),
+                margin: const EdgeInsets.only(bottom: 8),
                 child: Material(
                   color: Colors.transparent,
-                  borderRadius: borderRadius,
+                  borderRadius: BorderRadius.circular(16),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    borderRadius: borderRadius,
                     onTap: () {
                       if (isArtist) {
                         _openArtist(song.artist);
@@ -1109,41 +1147,28 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _buildSongRow({
     required Song song,
-    required int index,
-    required int total,
     required bool isDesktop,
+    bool showDragHandle = false,
   }) {
-    final isFirst = index == 0;
-    final isLast = index == total - 1;
-
-    return _entry(
-      index,
-      RepaintBoundary(
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            border: Border(
-              left: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-              right: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-              top: isFirst
-                  ? BorderSide(color: AppTheme.surfaceVariant, width: 0.7)
-                  : BorderSide.none,
-              bottom: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-            ),
-            borderRadius: BorderRadius.vertical(
-              top: isFirst ? const Radius.circular(18) : Radius.zero,
-              bottom: isLast ? const Radius.circular(18) : Radius.zero,
+    return RepaintBoundary(
+      child: Row(
+        children: [
+          Expanded(
+            child: SongListTile(
+              key: ValueKey(song.filePath ?? song.title),
+              song: song,
+              isDesktop: isDesktop,
+              onFavoriteChanged: (favorite) {
+                _scanner.setFavorite(song, favorite);
+              },
             ),
           ),
-          child: SongListTile(
-            key: ValueKey(song.filePath),
-            song: song,
-            isDesktop: isDesktop,
-            onFavoriteChanged: (favorite) {
-              _scanner.setFavorite(song, favorite);
-            },
-          ),
-        ),
+          if (showDragHandle)
+            const Padding(
+              padding: EdgeInsets.only(right: 14),
+              child: Icon(Icons.drag_handle_rounded),
+            ),
+        ],
       ),
     );
   }
