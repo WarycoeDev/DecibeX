@@ -1203,15 +1203,18 @@ class LibraryScreenState extends State<LibraryScreen>
         confirmLabel: 'Crear',
       ),
     );
+
     if (name == null || !mounted) return;
+
     try {
-      final playlist = await _playlistService.create(name);
+      await _playlistService.create(name);
+
       if (!mounted) return;
-      _savedScrollOffset = _currentScrollOffset;
-      _navigate(() {
-        _openedPlaylistId = playlist.id;
+
+      setState(() {
+        _openedPlaylistId = null;
         _reorderingPlaylist = false;
-      }, scrollTo: 0);
+      });
     } catch (_) {
       // Silencioso.
     }
@@ -1222,20 +1225,16 @@ class LibraryScreenState extends State<LibraryScreen>
       final result = await FilePicker.pickFiles(
         dialogTitle: 'Importar playlist',
         type: FileType.custom,
-        allowedExtensions: [
-          PlaylistService.extension.replaceFirst('.', ''), // 'decibex'
-        ],
+        allowedExtensions: [PlaylistService.extension.replaceFirst('.', '')],
       );
 
       if (result == null || result.isEmpty) return;
 
       final picked = result.first;
-
-      // Validación manual: si el selector ignoró el filtro (Android),
-      // comprobamos la extensión aquí y descartamos cualquier otra cosa.
       final nameLower = picked.name.toLowerCase();
-      if (!nameLower.endsWith(PlaylistService.extension)) {
-        return; // Archivo no válido: se ignora silenciosamente.
+
+      if (!nameLower.endsWith(PlaylistService.extension.toLowerCase())) {
+        return;
       }
 
       final bytes = await picked.readAsBytes();
@@ -1243,14 +1242,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
       if (content.trim().isEmpty) return;
 
-      final playlist = await _playlistService.importFromContent(content);
+      await _playlistService.importFromContent(content);
+
       if (!mounted) return;
 
-      _savedScrollOffset = _currentScrollOffset;
-      _navigate(() {
-        _openedPlaylistId = playlist.id;
+      setState(() {
+        _openedPlaylistId = null;
         _reorderingPlaylist = false;
-      }, scrollTo: 0);
+      });
     } catch (_) {
       // Silencioso.
     }
@@ -1434,6 +1433,7 @@ class LibraryScreenState extends State<LibraryScreen>
       return SliverLayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.crossAxisExtent;
+
           final columns = width >= 1100
               ? 5
               : width >= 800
@@ -1447,7 +1447,7 @@ class LibraryScreenState extends State<LibraryScreen>
               crossAxisCount: columns,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
-              childAspectRatio: isDesktop ? 0.78 : 0.68,
+              childAspectRatio: isDesktop ? 0.88 : 0.76,
             ),
             delegate: SliverChildBuilderDelegate(
               (context, index) {
@@ -1456,65 +1456,61 @@ class LibraryScreenState extends State<LibraryScreen>
 
                 return _entry(
                   index,
-                  Material(
-                    color: AppTheme.surface,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(
-                        color: AppTheme.surfaceVariant,
-                        width: 0.7,
+                  RepaintBoundary(
+                    child: Material(
+                      color: AppTheme.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(
+                          color: AppTheme.surfaceVariant,
+                          width: 0.7,
+                        ),
                       ),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () => _openPlaylist(playlist),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Center(
-                                child: AspectRatio(
-                                  aspectRatio: 1,
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => _openPlaylist(playlist),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: SizedBox(
+                                  width: double.infinity,
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
-                                    child: Container(
-                                      color: AppTheme.accent.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: [_playlistArtwork(songs)],
-                                      ),
-                                    ),
+                                    child: _playlistArtwork(songs),
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    playlist.name,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w600),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      playlist.name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
                                   ),
-                                ),
-                                _playlistMenu(playlist),
-                              ],
-                            ),
-                            Text(
-                              '${playlist.songCount} canciones',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: AppTheme.textSecondary),
-                            ),
-                          ],
+                                  _playlistMenu(playlist),
+                                ],
+                              ),
+                              Text(
+                                '${playlist.songCount} canciones',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: AppTheme.textSecondary),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -1534,66 +1530,74 @@ class LibraryScreenState extends State<LibraryScreen>
         (context, index) {
           final playlist = playlists[index];
           final songs = _playlistService.resolveSongs(playlist);
-          final first = index == 0;
-          final last = index == playlists.length - 1;
 
-          final radius = BorderRadius.vertical(
-            top: first ? const Radius.circular(18) : Radius.zero,
-            bottom: last ? const Radius.circular(18) : Radius.zero,
-          );
-
-          return Material(
-            color: AppTheme.surface,
-            borderRadius: radius,
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () => _openPlaylist(playlist),
+          return _entry(
+            index,
+            RepaintBoundary(
               child: Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isDesktop ? 18 : 12,
-                  vertical: 10,
-                ),
+                margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  borderRadius: radius,
+                  color: AppTheme.surface,
                   border: Border.all(
                     color: AppTheme.surfaceVariant,
                     width: 0.7,
                   ),
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 56,
-                      height: 56,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: _playlistArtwork(songs),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => _openPlaylist(playlist),
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: isDesktop ? 18 : 12,
+                        vertical: 12,
                       ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
-                          Text(
-                            playlist.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w600),
+                          SizedBox(
+                            width: 48,
+                            height: 48,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: _playlistArtwork(songs),
+                            ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${playlist.songCount} canciones',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: AppTheme.textSecondary),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  playlist.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${playlist.songCount} canciones',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: AppTheme.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          _playlistMenu(playlist),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppTheme.textSecondary,
                           ),
                         ],
                       ),
                     ),
-                    _playlistMenu(playlist),
-                    const Icon(Icons.chevron_right_rounded),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -1606,13 +1610,9 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Widget _playlistArtwork(List<Song> songs) {
-    final paths = songs
-        .map((song) => song.artworkPath)
-        .whereType<String>()
-        .where((path) => path.isNotEmpty)
-        .take(4)
-        .toList();
-    if (paths.isEmpty)
+    final path = songs.isNotEmpty ? songs.first.artworkPath : null;
+
+    if (path == null || path.isEmpty) {
       return Center(
         child: Icon(
           Icons.queue_music_rounded,
@@ -1620,32 +1620,18 @@ class LibraryScreenState extends State<LibraryScreen>
           size: 44,
         ),
       );
-    if (paths.length == 1)
-      return Image.file(
-        File(paths.first),
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Center(
-          child: Icon(
-            Icons.queue_music_rounded,
-            color: AppTheme.accent,
-            size: 44,
-          ),
+    }
+
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Center(
+        child: Icon(
+          Icons.queue_music_rounded,
+          color: AppTheme.accent,
+          size: 44,
         ),
-      );
-    return GridView.count(
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      padding: EdgeInsets.zero,
-      children: paths
-          .map(
-            (path) => Image.file(
-              File(path),
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  ColoredBox(color: AppTheme.surfaceVariant),
-            ),
-          )
-          .toList(),
+      ),
     );
   }
 
@@ -2778,143 +2764,220 @@ class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
     final theme = Theme.of(context);
 
     return Dialog(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: AppTheme.surfaceVariant,
+      surfaceTintColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: AppTheme.surfaceVariant, width: 0.7),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: AppTheme.accent.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Icon(widget.icon, size: 30, color: AppTheme.accent),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                widget.title,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                widget.subtitle,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 22),
-              ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _controller,
-                builder: (context, value, _) {
-                  return TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    autofocus: true,
-                    maxLength: _maxLength,
-                    textInputAction: TextInputAction.done,
-                    textCapitalization: TextCapitalization.sentences,
-                    onSubmitted: (_) => _submit(),
-                    style: theme.textTheme.titleMedium,
-                    decoration: InputDecoration(
-                      hintText: 'Nombre de la playlist',
-                      filled: true,
-                      fillColor: AppTheme.surfaceVariant.withValues(alpha: 0.5),
-                      prefixIcon: Icon(
-                        Icons.edit_note_rounded,
-                        color: AppTheme.textSecondary,
-                      ),
-                      suffixIcon: value.text.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: 'Borrar',
-                              icon: const Icon(Icons.close_rounded, size: 20),
-                              onPressed: _controller.clear,
-                            ),
-                      counterText: '${value.text.length}/$_maxLength',
-                      counterStyle: theme.textTheme.bodySmall?.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 16,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppTheme.surfaceVariant,
-                          width: 0.7,
-                        ),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppTheme.accent,
-                          width: 1.4,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              Row(
+        constraints: const BoxConstraints(maxWidth: 430),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Cabecera
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 16, 20),
+              child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        side: BorderSide(color: AppTheme.surfaceVariant),
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(13),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppTheme.accent,
+                          Color.lerp(AppTheme.accent, Colors.black, 0.65)!,
+                        ],
                       ),
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancelar'),
+                    ),
+                    child: Icon(widget.icon, color: Colors.white, size: 27),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.title,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: _controller,
-                      builder: (context, value, _) {
-                        return FilledButton(
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: value.text.trim().isEmpty ? null : _submit,
-                          child: Text(widget.confirmLabel),
-                        );
-                      },
-                    ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Cerrar',
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+            Divider(
+              height: 1,
+              color: AppTheme.textSecondary.withValues(alpha: 0.16),
+            ),
+
+            // Contenido
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                final length = value.text.length;
+
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Nombre de la playlist',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: length == 0
+                                  ? AppTheme.accent.withValues(alpha: 0.07)
+                                  : AppTheme.accent.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(50),
+                            ),
+                            child: Text(
+                              '$length/$_maxLength',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: AppTheme.accent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        autofocus: true,
+                        maxLength: _maxLength,
+                        textInputAction: TextInputAction.done,
+                        textCapitalization: TextCapitalization.sentences,
+                        onSubmitted: (_) => _submit(),
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                        cursorColor: AppTheme.accent,
+                        decoration: InputDecoration(
+                          hintText: 'Escribe un nombre',
+                          counterText: '',
+                          filled: true,
+                          fillColor: AppTheme.surface,
+                          prefixIcon: Icon(
+                            Icons.edit_note_rounded,
+                            color: AppTheme.textSecondary,
+                          ),
+                          suffixIcon: value.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Borrar',
+                                  icon: const Icon(
+                                    Icons.close_rounded,
+                                    size: 20,
+                                  ),
+                                  onPressed: _controller.clear,
+                                ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                              color: AppTheme.accent,
+                              width: 1.4,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+
+            Divider(
+              height: 1,
+              color: AppTheme.textSecondary.withValues(alpha: 0.16),
+            ),
+
+            // Acciones
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.textSecondary,
+                    ),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 8),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _controller,
+                    builder: (context, value, _) {
+                      return FilledButton.icon(
+                        onPressed: value.text.trim().isEmpty ? null : _submit,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.accent,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppTheme.accent.withValues(
+                            alpha: 0.3,
+                          ),
+                          disabledForegroundColor: Colors.white70,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        icon: const Icon(Icons.check_rounded),
+                        label: Text(widget.confirmLabel),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
