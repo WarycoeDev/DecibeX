@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 
 import '../models/song.dart';
 import 'playback_queue.dart';
+import 'statistics_service.dart'; // [STATS] nuevo import
 
 class PlaybackService extends ChangeNotifier {
   PlaybackService._() {
@@ -54,6 +55,10 @@ class PlaybackService extends ChangeNotifier {
       }
 
       _position = value;
+
+      // [STATS] Reportar posición para el conteo de reproducciones
+      StatisticsService.instance.onPositionChanged(value);
+
       notifyListeners();
     });
 
@@ -76,6 +81,9 @@ class PlaybackService extends ChangeNotifier {
           _position = Duration.zero;
           _seekTarget = null;
           _seekStartedAt = null;
+
+          // [STATS] Notificar cambio de canción
+          StatisticsService.instance.onSongChanged(taggedSong);
         }
       }
 
@@ -333,6 +341,10 @@ class PlaybackService extends ChangeNotifier {
     _duration = Duration.zero;
     _currentSong = song;
     _currentQueueIndex = _indexOfSong(_playingSongs, song);
+
+    // [STATS] Notificar cambio de canción al servicio de estadísticas.
+    // Resetea el flag de conteo por si la misma canción se repite (LoopMode.one).
+    StatisticsService.instance.onSongChanged(song);
 
     if (_shuffleEnabled) {
       _shuffleCursor = _indexOfSong(_shuffleOrder, song);
@@ -694,6 +706,11 @@ class PlaybackService extends ChangeNotifier {
     _seekTarget = position;
     _seekStartedAt = DateTime.now();
     _position = position;
+
+    // [STATS] Si el seek es hacia atrás (por debajo del umbral),
+    // permitir que la canción vuelva a contar.
+    StatisticsService.instance.onSeek(position);
+
     notifyListeners();
 
     await _player.seek(position);
@@ -720,6 +737,9 @@ class PlaybackService extends ChangeNotifier {
     _handlingCompletion = false;
     _seekTarget = null;
     _seekStartedAt = null;
+
+    // [STATS] Limpiar seguimiento al detener
+    StatisticsService.instance.onSongChanged(null);
 
     notifyListeners();
   }
