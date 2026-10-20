@@ -936,7 +936,6 @@ class LibraryScreenState extends State<LibraryScreen>
 
     const buttonStyle = ButtonStyle(
       fixedSize: WidgetStatePropertyAll(Size(44, 44)),
-
       padding: WidgetStatePropertyAll(EdgeInsets.zero),
     );
 
@@ -945,34 +944,24 @@ class LibraryScreenState extends State<LibraryScreen>
         if (_isDetailView) ...[
           Material(
             color: AppTheme.surface,
-
             borderRadius: BorderRadius.circular(12),
-
             child: InkWell(
               onTap: _goBack,
-
               borderRadius: BorderRadius.circular(12),
-
               child: Container(
                 width: 44,
-
                 height: 44,
-
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-
                   border: Border.all(
                     color: AppTheme.surfaceVariant,
-
                     width: 0.7,
                   ),
                 ),
-
                 child: const Icon(Icons.arrow_back_rounded),
               ),
             ),
           ),
-
           const SizedBox(width: 12),
         ],
 
@@ -980,27 +969,19 @@ class LibraryScreenState extends State<LibraryScreen>
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-
             mainAxisSize: MainAxisSize.min,
-
             children: [
               ScrollingTitle(
                 title: _sectionTitle,
-
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
-
               const SizedBox(height: 2),
-
               Text(
                 _sectionSubtitle(songs),
-
                 maxLines: 1,
-
                 overflow: TextOverflow.ellipsis,
-
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -1009,21 +990,17 @@ class LibraryScreenState extends State<LibraryScreen>
           ),
         ),
 
-        // Botones circulares, solo icono
+        // Reordenar favoritos
         if (showReorder) ...[
           const SizedBox(width: 8),
-
           IconButton(
             style: buttonStyle,
-
             tooltip: _reorderingFavorites
                 ? 'Terminar de ordenar'
                 : 'Reordenar favoritos',
-
             onPressed: () {
               setState(() => _reorderingFavorites = !_reorderingFavorites);
             },
-
             icon: Icon(
               _reorderingFavorites
                   ? Icons.check_rounded
@@ -1032,28 +1009,34 @@ class LibraryScreenState extends State<LibraryScreen>
           ),
         ],
 
+        // Reordenar playlist (movido aquí, antes de los botones de playback)
+        if (_selectedTab == _LibraryTab.playlists &&
+            _openedPlaylistId != null) ...[
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Terminar de ordenar',
+            onPressed: () =>
+                setState(() => _reorderingPlaylist = !_reorderingPlaylist),
+            icon: Icon(
+              _reorderingPlaylist ? Icons.check_rounded : Icons.reorder_rounded,
+            ),
+          ),
+        ],
+
+        // Botones de reproducción
         if (showPlaybackButtons) ...[
           const SizedBox(width: 8),
-
           IconButton.filledTonal(
             style: buttonStyle,
-
             tooltip: 'Agregar a la cola',
-
             onPressed: () => _addSongsToQueue(songs),
-
             icon: const Icon(Icons.queue_music_rounded),
           ),
-
           const SizedBox(width: 8),
-
           IconButton.filled(
             style: buttonStyle,
-
             tooltip: 'Reproducir todo',
-
             onPressed: () => _playSongs(songs),
-
             icon: const Icon(Icons.play_arrow_rounded),
           ),
         ],
@@ -1067,18 +1050,7 @@ class LibraryScreenState extends State<LibraryScreen>
             icon: const Icon(Icons.add_rounded),
           ),
         ],
-        if (_selectedTab == _LibraryTab.playlists &&
-            _openedPlaylistId != null) ...[
-          const SizedBox(width: 8),
-          IconButton.filledTonal(
-            tooltip: 'Terminar de ordenar',
-            onPressed: () =>
-                setState(() => _reorderingPlaylist = !_reorderingPlaylist),
-            icon: Icon(
-              _reorderingPlaylist ? Icons.check_rounded : Icons.reorder_rounded,
-            ),
-          ),
-        ],
+
         if (_isCollectionTab) ...[
           const SizedBox(width: 12),
           _buildViewModeButtons(),
@@ -1427,6 +1399,28 @@ class LibraryScreenState extends State<LibraryScreen>
     }, scrollTo: 0);
   }
 
+  /// Calcula el childAspectRatio para que la celda mida exactamente:
+  /// padding vertical + carátula cuadrada (= ancho interno) + gap + texto.
+  double _gridAspectRatio({
+    required double crossAxisExtent,
+    required int columns,
+    required double crossAxisSpacing,
+    required double textHeight,
+  }) {
+    const double horizontalPadding = 12 * 2; // EdgeInsets.all(12)
+    const double verticalPadding = 12 * 2;
+    const double gap = 10; // SizedBox entre carátula y texto
+
+    final double cellWidth =
+        (crossAxisExtent - crossAxisSpacing * (columns - 1)) / columns;
+
+    final double artworkSize = cellWidth - horizontalPadding;
+
+    final double cellHeight = verticalPadding + artworkSize + gap + textHeight;
+
+    return cellWidth / cellHeight;
+  }
+
   Widget _buildPlaylistsCollection(bool isDesktop) {
     final playlists = _playlistService.playlists;
 
@@ -1443,12 +1437,22 @@ class LibraryScreenState extends State<LibraryScreen>
               ? 3
               : 2;
 
+          const double spacing = 12;
+
+          // Playlists: título (2 líneas) + subtítulo (1 línea) ≈ 58 px
+          final ratio = _gridAspectRatio(
+            crossAxisExtent: width,
+            columns: columns,
+            crossAxisSpacing: spacing,
+            textHeight: 58,
+          );
+
           return SliverGrid(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: isDesktop ? 0.88 : 0.76,
+              crossAxisSpacing: spacing,
+              mainAxisSpacing: spacing,
+              childAspectRatio: ratio,
             ),
             delegate: SliverChildBuilderDelegate(
               (context, index) {
@@ -1474,15 +1478,21 @@ class LibraryScreenState extends State<LibraryScreen>
                           padding: const EdgeInsets.all(12),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Expanded(
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: _playlistArtwork(songs),
-                                  ),
-                                ),
+                              // Carátula CUADRADA, tamaño = ancho interno
+                              LayoutBuilder(
+                                builder: (context, box) {
+                                  final size = box.maxWidth;
+                                  return SizedBox(
+                                    width: size,
+                                    height: size,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: _playlistArtwork(songs),
+                                    ),
+                                  );
+                                },
                               ),
                               const SizedBox(height: 10),
                               Row(
@@ -2227,11 +2237,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _buildCollectionGrid(
     List<Song> songs,
-
     bool isDesktop, {
-
     required bool isArtist,
-
     bool isPodcast = false,
   }) {
     return SliverLayoutBuilder(
@@ -2246,17 +2253,23 @@ class LibraryScreenState extends State<LibraryScreen>
             ? 3
             : 2;
 
+        const double spacing = 12;
+
+        // Colecciones: solo título (2 líneas) ≈ 40 px
+        final ratio = _gridAspectRatio(
+          crossAxisExtent: width,
+          columns: columns,
+          crossAxisSpacing: spacing,
+          textHeight: 40,
+        );
+
         return SliverGrid(
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-
-            crossAxisSpacing: 12,
-
-            mainAxisSpacing: 12,
-
-            childAspectRatio: isDesktop ? 0.88 : 0.76,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+            childAspectRatio: ratio,
           ),
-
           delegate: SliverChildBuilderDelegate(
             (context, index) {
               final song = songs[index];
@@ -2267,23 +2280,17 @@ class LibraryScreenState extends State<LibraryScreen>
 
               return _entry(
                 index,
-
                 RepaintBoundary(
                   child: Material(
                     color: AppTheme.surface,
-
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
-
                       side: BorderSide(
                         color: AppTheme.surfaceVariant,
-
                         width: 0.7,
                       ),
                     ),
-
                     clipBehavior: Clip.antiAlias,
-
                     child: InkWell(
                       onTap: () {
                         if (isArtist) {
@@ -2294,41 +2301,35 @@ class LibraryScreenState extends State<LibraryScreen>
                           _openAlbum(song);
                         }
                       },
-
                       child: Padding(
                         padding: const EdgeInsets.all(12),
-
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
-
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Expanded(
-                              child: SizedBox(
-                                width: double.infinity,
-
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-
-                                  child: _buildGridArtwork(
-                                    song,
-
-                                    isArtist,
-
-                                    isPodcast: isPodcast,
+                            // Carátula CUADRADA, tamaño = ancho interno
+                            LayoutBuilder(
+                              builder: (context, box) {
+                                final size = box.maxWidth;
+                                return SizedBox(
+                                  width: size,
+                                  height: size,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: _buildGridArtwork(
+                                      song,
+                                      isArtist,
+                                      isPodcast: isPodcast,
+                                    ),
                                   ),
-                                ),
-                              ),
+                                );
+                              },
                             ),
-
                             const SizedBox(height: 10),
-
                             Text(
                               title,
-
                               maxLines: 2,
-
                               overflow: TextOverflow.ellipsis,
-
                               style: Theme.of(context).textTheme.titleSmall
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),
@@ -2340,9 +2341,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 ),
               );
             },
-
             childCount: songs.length,
-
             addAutomaticKeepAlives: false,
           ),
         );
@@ -2360,13 +2359,7 @@ class LibraryScreenState extends State<LibraryScreen>
         : Icons.album_rounded;
 
     Widget placeholder() {
-      return Container(
-        color: AppTheme.accent.withValues(alpha: 0.12),
-
-        alignment: Alignment.center,
-
-        child: Icon(icon, size: 44, color: AppTheme.accent),
-      );
+      return Center(child: Icon(icon, size: 44, color: AppTheme.accent));
     }
 
     if (path == null || path.isEmpty) return placeholder();
