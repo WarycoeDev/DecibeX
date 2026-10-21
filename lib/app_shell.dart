@@ -8,6 +8,7 @@ import 'ui/player/mini_player.dart';
 import 'ui/player/player_screen.dart';
 import 'ui/search/search_screen.dart';
 import 'ui/settings/settings_screen.dart';
+import 'ui/youtube/youtube_screen.dart'; // [NUEVO]
 import 'core/services/playback_service.dart';
 import 'core/services/playback_queue.dart';
 
@@ -22,6 +23,9 @@ class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
   bool _sidebarExpanded = true;
   bool _desktopPlayerExpanded = false;
+
+  // [NUEVO] Controla si la pantalla de YouTube está abierta.
+  bool _youtubeOpen = false;
 
   // Estado del miniplayer móvil minimizado (oculto detrás de la barra).
   bool _miniPlayerMinimized = false;
@@ -118,6 +122,13 @@ class _AppShellState extends State<AppShell> {
 
   bool _isDesktop(BuildContext context) {
     return MediaQuery.sizeOf(context).width >= 700;
+  }
+
+  // [NUEVO] Abre/cierra la pantalla de YouTube con el mismo botón.
+  void _toggleYouTube() {
+    setState(() {
+      _youtubeOpen = !_youtubeOpen;
+    });
   }
 
   Future<void> _openPlayerScreen() async {
@@ -228,6 +239,14 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _handleBack() {
+    // [NUEVO] Si YouTube está abierto, el back lo cierra primero.
+    if (_youtubeOpen) {
+      setState(() {
+        _youtubeOpen = false;
+      });
+      return;
+    }
+
     if (_selectedIndex == 1) {
       final libraryState = _libraryKey.currentState;
 
@@ -270,7 +289,8 @@ class _AppShellState extends State<AppShell> {
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return PopScope<Object?>(
-      canPop: _selectedIndex == 0,
+      // [NUEVO] No se puede hacer pop del shell si YouTube está abierto.
+      canPop: _selectedIndex == 0 && !_youtubeOpen,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
           _handleBack();
@@ -291,17 +311,67 @@ class _AppShellState extends State<AppShell> {
                         children: [
                           if (isDesktop) _buildSidebar(),
                           Expanded(
-                            child: PageView(
-                              controller: _pageController,
-                              physics: const NeverScrollableScrollPhysics(),
-                              onPageChanged: (index) {
-                                if (_selectedIndex != index) {
-                                  setState(() {
-                                    _selectedIndex = index;
-                                  });
-                                }
-                              },
-                              children: _screens,
+                            // [AJUSTE] El panel de YouTube se superpone
+                            // SOLO sobre el área de contenido (PageView),
+                            // no sobre la TitleBar, el sidebar ni la
+                            // BottomNavigationBar.
+                            child: Stack(
+                              children: [
+                                PageView(
+                                  controller: _pageController,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  onPageChanged: (index) {
+                                    if (_selectedIndex != index) {
+                                      setState(() {
+                                        _selectedIndex = index;
+                                      });
+                                    }
+                                  },
+                                  children: _screens,
+                                ),
+
+                                // [AJUSTE] Panel de YouTube dentro del área
+                                // de contenido. No cubre chrome de la app.
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    ignoring: !_youtubeOpen,
+                                    child: AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 260,
+                                      ),
+                                      switchInCurve: Curves.easeOutCubic,
+                                      switchOutCurve: Curves.easeInCubic,
+                                      transitionBuilder: (child, animation) {
+                                        final slide = Tween<Offset>(
+                                          begin: const Offset(0, 0.04),
+                                          end: Offset.zero,
+                                        ).animate(animation);
+
+                                        return FadeTransition(
+                                          opacity: animation,
+                                          child: SlideTransition(
+                                            position: slide,
+                                            child: child,
+                                          ),
+                                        );
+                                      },
+                                      child: _youtubeOpen
+                                          ? Container(
+                                              key: const ValueKey<String>(
+                                                'youtube-open',
+                                              ),
+                                              color: AppTheme.surface,
+                                              child: const YouTubeScreen(),
+                                            )
+                                          : const SizedBox.shrink(
+                                              key: ValueKey<String>(
+                                                'youtube-closed',
+                                              ),
+                                            ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -312,6 +382,9 @@ class _AppShellState extends State<AppShell> {
                   ],
                 ),
 
+                // [AJUSTE] Los miniplayers se dibujan DESPUÉS del Column
+                // en el Stack, por lo que quedan por ENCIMA del panel
+                // de YouTube (y también del PageView). Sin cambios.
                 if (!isDesktop && !keyboardVisible)
                   Positioned(
                     left: 0,
@@ -495,10 +568,25 @@ class _AppShellState extends State<AppShell> {
           ),
           Expanded(
             child: Text(
-              _titles[_selectedIndex],
+              // [NUEVO] El título muestra "YouTube" cuando esa pantalla
+              // está abierta.
+              _youtubeOpen ? 'YouTube' : _titles[_selectedIndex],
               style: Theme.of(context).textTheme.titleMedium,
               overflow: TextOverflow.ellipsis,
             ),
+          ),
+          // [NUEVO] Mismo botón para abrir y cerrar la pantalla de YouTube.
+          IconButton(
+            tooltip: _youtubeOpen ? 'Cerrar YouTube' : 'Abrir YouTube',
+            icon: Icon(
+              _youtubeOpen
+                  ? Icons.close_rounded
+                  : Icons.play_circle_outline_rounded,
+            ),
+            color: _youtubeOpen
+                ? AppTheme.accent
+                : const Color.fromARGB(255, 255, 255, 255),
+            onPressed: _toggleYouTube,
           ),
         ],
       ),
@@ -607,7 +695,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _buildSidebarItem(int index) {
-    final selected = _selectedIndex == index;
+    final selected = _selectedIndex == index && !_youtubeOpen;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
@@ -617,7 +705,15 @@ class _AppShellState extends State<AppShell> {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => _selectPage(index),
+          onTap: () {
+            // [NUEVO] Al navegar desde el menú, cierra YouTube.
+            if (_youtubeOpen) {
+              setState(() {
+                _youtubeOpen = false;
+              });
+            }
+            _selectPage(index);
+          },
           child: SizedBox(
             height: 48,
             child: Row(
@@ -666,7 +762,15 @@ class _AppShellState extends State<AppShell> {
   Widget _buildBottomNavigation() {
     return NavigationBar(
       selectedIndex: _selectedIndex,
-      onDestinationSelected: _selectPage,
+      onDestinationSelected: (index) {
+        // [NUEVO] Al navegar desde la barra inferior, cierra YouTube.
+        if (_youtubeOpen) {
+          setState(() {
+            _youtubeOpen = false;
+          });
+        }
+        _selectPage(index);
+      },
       destinations: const [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),

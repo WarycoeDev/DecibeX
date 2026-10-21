@@ -19,6 +19,7 @@ dependencies:
   media_kit_libs_linux: any
   media_kit_libs_windows_audio: any
   ffmpeg_kit_flutter_new: ^4.6.7
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
