@@ -457,23 +457,53 @@ class LibraryScanner extends ChangeNotifier {
     return setA.length == setB.length && setA.containsAll(setB);
   }
 
+  /// Configura el watcher del directorio de settings de forma segura.
+  ///
+  /// En Android, el directorio de settings (`.../data`) puede no existir
+  /// todavía en el primer arranque, y `Directory.watch()` lanza un assert
+  /// interno (`_MultiplexingFileSystemWatcher._startWatching`) si el path
+  /// no es un directorio válido en el momento exacto de la llamada.
+  ///
+  /// Por eso aquí:
+  ///  1. Cancelamos cualquier watcher previo (evita duplicados y fugas).
+  ///  2. Aseguramos que el directorio exista realmente justo antes de
+  ///     vigilarlo.
+  ///  3. Capturamos cualquier excepción para no tumbar el arranque.
   Future<void> _configureSettingsWatcher(Directory directory) async {
-    if (_disposed || _settingsWatcher != null) return;
+    if (_disposed) return;
+
+    // 1. Cancelar watcher anterior si lo hubiera.
+    final previous = _settingsWatcher;
+    if (previous != null) {
+      _settingsWatcher = null;
+      try {
+        await previous.cancel();
+      } catch (_) {}
+      if (_disposed) return;
+    }
 
     try {
+      // 2. Crear y verificar el directorio justo antes de vigilarlo.
       if (!await directory.exists()) {
         await directory.create(recursive: true);
+        if (_disposed) return;
+
+        if (!await directory.exists()) return;
       }
 
-      if (_disposed) return;
-
+      // 3. Vigilar con manejo de errores para no romper el arranque.
       _settingsWatcher = directory
           .watch(events: FileSystemEvent.all, recursive: false)
           .listen(
             (_) => _scheduleConfigurationRefresh(),
             onError: (_) => _scheduleConfigurationRefresh(),
+            cancelOnError: false,
           );
-    } catch (_) {}
+    } catch (e) {
+      // No es crítico: si falla el watcher, el Timer.periodic de
+      // `initialize()` sigue refrescando la configuración cada 2s.
+      debugPrint('[LibraryScanner] No se pudo vigilar settings: $e');
+    }
   }
 
   void _scheduleConfigurationRefresh() {
@@ -513,10 +543,16 @@ class LibraryScanner extends ChangeNotifier {
 
         final subscription = directory
             .watch(events: FileSystemEvent.all, recursive: _recursive)
-            .listen((_) => _scheduleScan(), onError: (_) => _scheduleScan());
+            .listen(
+              (_) => _scheduleScan(),
+              onError: (_) => _scheduleScan(),
+              cancelOnError: false,
+            );
 
         _watchers.add(subscription);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[LibraryScanner] No se pudo vigilar "$path": $e');
+      }
     }
   }
 
@@ -1011,6 +1047,7 @@ class LibraryScanner extends ChangeNotifier {
     _settingsDebounceTimer?.cancel();
 
     final settingsWatcher = _settingsWatcher;
+    _settingsWatcher = null;
     if (settingsWatcher != null) {
       unawaited(settingsWatcher.cancel());
     }

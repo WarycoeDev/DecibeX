@@ -5,9 +5,10 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   ffmpeg_kit_flutter_new
   media_kit_libs_windows_audio
+  media_kit_libs_windows_video
+  media_kit_video
   media_metadata
   permission_handler_windows
-  url_launcher_windows
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

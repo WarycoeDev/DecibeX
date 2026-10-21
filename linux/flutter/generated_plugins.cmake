@@ -5,8 +5,8 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   ffmpeg_kit_flutter_new
   media_kit_libs_linux
+  media_kit_video
   media_metadata
-  url_launcher_linux
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

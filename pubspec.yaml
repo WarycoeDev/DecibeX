@@ -19,7 +19,8 @@ dependencies:
   media_kit_libs_linux: any
   media_kit_libs_windows_audio: any
   ffmpeg_kit_flutter_new: ^4.6.7
-  url_launcher: ^6.3.0
+  youtube_explode_dart: ^3.1.0
+  universal_youtube_player: ^0.1.0
 
 dev_dependencies:
   flutter_test:
