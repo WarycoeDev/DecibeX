@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../app_theme.dart';
+import '../../core/services/replay_gain_service.dart';
+import '../../core/services/settings_service.dart';
 
 enum _LayoutSize { compact, medium, expanded }
 
@@ -60,6 +63,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadSettings();
+    SettingsService.instance.addListener(_onExternalSettingsChanged);
+  }
+
+  @override
+  void dispose() {
+    SettingsService.instance.removeListener(_onExternalSettingsChanged);
+    super.dispose();
+  }
+
+  /// Refleja cambios externos (p. ej. `PlaybackService` recargó el archivo).
+  void _onExternalSettingsChanged() {
+    final s = SettingsService.instance;
+    if (!mounted) return;
+
+    final needsUpdate =
+        _replayGainEnabled != s.replayGainEnabled ||
+        _replayGainPreamp != s.replayGainPreamp ||
+        _darkTheme != s.darkTheme ||
+        _accentColorValue != s.accentColorValue;
+
+    if (!needsUpdate) return;
+
+    setState(() {
+      _darkTheme = s.darkTheme;
+      _accentColorValue = s.accentColorValue;
+      _replayGainEnabled = s.replayGainEnabled;
+      _replayGainPreamp = s.replayGainPreamp;
+    });
   }
 
   _LayoutSize _layoutFor(double width) {
@@ -92,20 +123,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     try {
-      final file = await _getSettingsFile();
-      _storagePath = file.path;
+      await SettingsService.instance.initialize();
+      await SettingsService.instance.reload();
 
-      if (await file.exists()) {
-        final content = await file.readAsString();
+      final s = SettingsService.instance;
 
-        if (content.trim().isNotEmpty) {
-          final decoded = jsonDecode(content);
-
-          if (decoded is Map<String, dynamic>) {
-            _applySettings(decoded);
-          }
-        }
-      }
+      _storagePath = s.storagePath;
+      _darkTheme = s.darkTheme;
+      _accentColorValue = s.accentColorValue;
+      _replayGainEnabled = s.replayGainEnabled;
+      _replayGainPreamp = s.replayGainPreamp;
+      _fadeInEnabled = s.fadeInEnabled;
+      _fadeOutEnabled = s.fadeOutEnabled;
+      _fadeInDuration = s.fadeInDuration;
+      _fadeOutDuration = s.fadeOutDuration;
+      _scanSubdirectories = s.scanSubdirectories;
+      _scanDirectories = List<String>.from(s.scanDirectories);
+      _podcastDirectories = List<String>.from(s.podcastDirectories);
+      _artistsGridMode = s.artistsGridMode;
+      _albumsGridMode = s.albumsGridMode;
     } catch (error) {
       _storageError = error.toString();
     }
@@ -119,105 +155,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _applySettings(Map<String, dynamic> json) {
-    _darkTheme = json['darkTheme'] is bool
-        ? json['darkTheme'] as bool
-        : _darkTheme;
-
-    _accentColorValue = json['accentColor'] is int
-        ? json['accentColor'] as int
-        : _accentColorValue;
-
-    _replayGainEnabled = json['replayGainEnabled'] is bool
-        ? json['replayGainEnabled'] as bool
-        : _replayGainEnabled;
-
-    _replayGainPreamp = _readDouble(
-      json['replayGainPreamp'],
-      _replayGainPreamp,
-      -12,
-      12,
-    );
-
-    _fadeInEnabled = json['fadeInEnabled'] is bool
-        ? json['fadeInEnabled'] as bool
-        : _fadeInEnabled;
-
-    _fadeOutEnabled = json['fadeOutEnabled'] is bool
-        ? json['fadeOutEnabled'] as bool
-        : _fadeOutEnabled;
-
-    _fadeInDuration = _readDouble(
-      json['fadeInDuration'],
-      _fadeInDuration,
-      0,
-      10,
-    );
-
-    _fadeOutDuration = _readDouble(
-      json['fadeOutDuration'],
-      _fadeOutDuration,
-      0,
-      10,
-    );
-
-    _scanSubdirectories = json['scanSubdirectories'] is bool
-        ? json['scanSubdirectories'] as bool
-        : _scanSubdirectories;
-
-    _artistsGridMode = json['artistsGridMode'] is bool
-        ? json['artistsGridMode'] as bool
-        : false;
-
-    _albumsGridMode = json['albumsGridMode'] is bool
-        ? json['albumsGridMode'] as bool
-        : false;
-
-    final directories = json['scanDirectories'];
-
-    if (directories is List) {
-      _scanDirectories = directories.whereType<String>().toSet().toList();
-    }
-
-    final podcastDirectories = json['podcastDirectories'];
-
-    if (podcastDirectories is List) {
-      _podcastDirectories = podcastDirectories
-          .whereType<String>()
-          .toSet()
-          .toList();
-    }
-  }
-
-  double _readDouble(
-    dynamic value,
-    double fallback,
-    double minimum,
-    double maximum,
-  ) {
-    final number = value is num ? value.toDouble() : fallback;
-    return number.clamp(minimum, maximum).toDouble();
-  }
-
-  Map<String, dynamic> _serializeSettings() {
-    return {
-      'version': 1,
-      'darkTheme': _darkTheme,
-      'accentColor': _accentColorValue,
-      'replayGainEnabled': _replayGainEnabled,
-      'replayGainPreamp': _replayGainPreamp,
-      'fadeInEnabled': _fadeInEnabled,
-      'fadeOutEnabled': _fadeOutEnabled,
-      'fadeInDuration': _fadeInDuration,
-      'fadeOutDuration': _fadeOutDuration,
-      'scanSubdirectories': _scanSubdirectories,
-      'scanDirectories': _scanDirectories,
-      'podcastDirectories': _podcastDirectories,
-      'artistsGridMode': _artistsGridMode,
-      'albumsGridMode': _albumsGridMode,
-    };
-  }
-
+  /// Sincroniza el estado local con `SettingsService` y escribe a disco.
   Future<void> _saveSettings({bool showError = true}) async {
     if (_isSaving) {
       _saveAgain = true;
@@ -230,14 +168,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       do {
         _saveAgain = false;
 
-        final file = await _getSettingsFile();
-        final json = const JsonEncoder.withIndent(
-          '  ',
-        ).convert(_serializeSettings());
+        final s = SettingsService.instance;
+        s.darkTheme = _darkTheme;
+        s.accentColorValue = _accentColorValue;
+        s.replayGainEnabled = _replayGainEnabled;
+        s.replayGainPreamp = _replayGainPreamp;
+        s.fadeInEnabled = _fadeInEnabled;
+        s.fadeOutEnabled = _fadeOutEnabled;
+        s.fadeInDuration = _fadeInDuration;
+        s.fadeOutDuration = _fadeOutDuration;
+        s.scanSubdirectories = _scanSubdirectories;
+        s.scanDirectories = List<String>.from(_scanDirectories);
+        s.podcastDirectories = List<String>.from(_podcastDirectories);
+        s.artistsGridMode = _artistsGridMode;
+        s.albumsGridMode = _albumsGridMode;
 
-        await file.writeAsString(json, flush: true);
+        await s.save();
 
-        _storagePath = file.path;
+        _storagePath = s.storagePath;
         _storageError = null;
       } while (_saveAgain);
     } catch (error) {
@@ -377,6 +325,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     AppTheme.updateAppearance(darkTheme: _darkTheme, accentColor: _accentColor);
 
     await _saveSettings();
+  }
+
+  // ===========================================================================
+  // HELPERS DE UI — contenedor tipo bottom sheet premium
+  // ===========================================================================
+
+  /// Contenedor reutilizable que replica el estilo del selector de playlists:
+  /// margen 12, radio 24, borde `surfaceVariant` 0.7, sombra elevada y
+  /// altura máxima del 82 % de la pantalla.
+  Widget _buildSheetContainer({
+    required BuildContext context,
+    required Widget child,
+  }) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  /// Handle superior (drag indicator) reutilizable.
+  Widget _buildSheetHandle() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Container(
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(2),
+        ),
+      ),
+    );
   }
 
   @override
@@ -708,6 +708,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _updateSetting(() {
               _replayGainEnabled = value;
             });
+            // Notificación inmediata: PlaybackService lo verá en la
+            // siguiente pista sin esperar al watcher del archivo.
+            SettingsService.instance.setReplayGainEnabled(value);
           },
         ),
         _buildDivider(),
@@ -716,22 +719,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: _SettingSlider(
             icon: Icons.volume_up_rounded,
             title: 'ReplayGain preamp',
-            subtitle: 'Ajuste adicional de ganancia.',
+            subtitle: 'Se suma a la ganancia calculada de cada pista.',
             value: _replayGainPreamp,
             min: -12,
             max: 12,
             divisions: 48,
             accent: _accentColor,
-            valueLabel: '${_replayGainPreamp.toStringAsFixed(1)} dB',
-            enabled: _replayGainEnabled,
+            valueLabel:
+                '${_replayGainPreamp >= 0 ? "+" : ""}'
+                '${_replayGainPreamp.toStringAsFixed(1)} dB',
+            // Siempre activo: se puede configurar antes de activar
+            // ReplayGain; solo surte efecto cuando ReplayGain está ON.
+            enabled: true,
             onChanged: (value) {
               setState(() {
                 _replayGainPreamp = value;
               });
+              // Notificación inmediata al PlaybackService.
+              SettingsService.instance.setReplayGainPreamp(value);
             },
             onChangeEnd: (_) => _saveSettings(),
           ),
         ),
+        _buildDivider(),
+        _buildReplayGainAnalyzer(),
         _buildDivider(),
         _SettingSwitchTile(
           icon: Icons.trending_up_rounded,
@@ -802,6 +813,950 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildReplayGainAnalyzer() {
+    final service = ReplayGainService.instance;
+
+    return AnimatedBuilder(
+      animation: service,
+      builder: (context, _) {
+        final running = service.isRunning;
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.auto_fix_high_rounded,
+                    size: 21,
+                    color: _replayGainEnabled
+                        ? _accentColor
+                        : AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Calcular ReplayGain por archivo',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          'Analiza cada pista y guarda su ganancia en la biblioteca.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: AppTheme.textSecondary,
+                                height: 1.4,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (service.lastError != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  service.lastError!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.orange),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: (running || !_replayGainEnabled || kIsWeb)
+                          ? null
+                          : () => _showAnalyzeDialog(),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('Analizar pendientes'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _accentColor,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: _accentColor.withValues(
+                          alpha: 0.35,
+                        ),
+                        disabledForegroundColor: Colors.white.withValues(
+                          alpha: 0.7,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Reanalizar toda la biblioteca',
+                    onPressed: (running || !_replayGainEnabled || kIsWeb)
+                        ? null
+                        : () => _confirmReanalyze(),
+                    icon: const Icon(Icons.refresh_rounded),
+                    color: _accentColor,
+                  ),
+                  IconButton(
+                    tooltip: 'Borrar ganancias calculadas',
+                    onPressed: (running || !_replayGainEnabled || kIsWeb)
+                        ? null
+                        : () => _confirmClearReplayGain(),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    color: AppTheme.textSecondary,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ===========================================================================
+  // DIÁLOGO: ANALIZAR PENDIENTES (con estado "no hay pistas nuevas")
+  // ===========================================================================
+
+  Future<void> _showAnalyzeDialog() async {
+    final service = ReplayGainService.instance;
+
+    // Lanza el análisis antes de mostrar el diálogo para que el
+    // estado "running" esté disponible de inmediato.
+    final future = service.analyzeLibrary();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (sheetContext) {
+        return PopScope(
+          canPop: false,
+          child: AnimatedBuilder(
+            animation: service,
+            builder: (context, _) {
+              final theme = Theme.of(context);
+              final total = service.total;
+              final processed = service.processed;
+              final running = service.isRunning;
+              final finished = !running;
+              final progress = total == 0 ? 0.0 : processed / total;
+              final percent = (progress * 100).clamp(0, 100).toStringAsFixed(0);
+
+              // [NUEVO] Estado "sin pistas pendientes":
+              // - O bien el servicio ya no corre y total == 0 (terminó al instante).
+              // - O bien no había pendientes desde el inicio.
+              final noPending = finished && total == 0;
+
+              return _buildSheetContainer(
+                context: context,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildSheetHandle(),
+                    const SizedBox(height: 18),
+
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        children: [
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 72,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: AppTheme.surfaceVariant,
+                                    width: 0.7,
+                                  ),
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      _accentColor,
+                                      Color.lerp(
+                                        _accentColor,
+                                        Colors.black,
+                                        0.55,
+                                      )!,
+                                    ],
+                                  ),
+                                ),
+                                child: Icon(
+                                  noPending
+                                      ? Icons.check_circle_outline_rounded
+                                      : Icons.graphic_eq_rounded,
+                                  color: Colors.white.withValues(alpha: 0.95),
+                                  size: 32,
+                                ),
+                              ),
+                              Positioned(
+                                right: -6,
+                                bottom: -6,
+                                child: Container(
+                                  width: 28,
+                                  height: 28,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: _accentColor,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: AppTheme.surface,
+                                      width: 3,
+                                    ),
+                                  ),
+                                  child: running
+                                      ? SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                            value: total == 0 ? null : progress,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.check_rounded,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  running
+                                      ? 'Calculando ReplayGain'
+                                      : noPending
+                                      ? 'No hay pistas nuevas'
+                                      : 'ReplayGain completado',
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: -0.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  running
+                                      ? 'Analizando $processed de $total…'
+                                      : noPending
+                                      ? 'Todas las pistas ya tienen su ganancia.'
+                                      : 'Análisis finalizado.',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  running
+                                      ? 'Normalización de volumen por pista'
+                                      : noPending
+                                      ? 'No se ha analizado ninguna pista nueva.'
+                                      : 'Ganancias guardadas en la biblioteca',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: running
+                                ? null
+                                : () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close_rounded),
+                            tooltip: 'Cerrar',
+                            visualDensity: VisualDensity.compact,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+
+                    // [NUEVO] Si no hay pendientes, mostramos solo una
+                    // caja informativa en lugar del subheader + barra.
+                    if (noPending)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _accentColor.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: _accentColor.withValues(alpha: 0.30),
+                              width: 0.7,
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 18,
+                                color: _accentColor,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Usa el botón de reanalizar si quieres volver '
+                                  'a calcular las ganancias de toda la biblioteca.',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppTheme.textSecondary,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else ...[
+                      // Subheader con píldora de progreso
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Progreso del análisis',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  color: AppTheme.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: (running || percent != '0')
+                                    ? _accentColor.withValues(alpha: 0.16)
+                                    : AppTheme.surfaceVariant,
+                                borderRadius: BorderRadius.circular(50),
+                              ),
+                              child: Text(
+                                running
+                                    ? '$percent %'
+                                    : (finished ? 'Listo' : '$percent %'),
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: (running || percent != '0')
+                                      ? _accentColor
+                                      : AppTheme.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Barra de progreso + metadatos + error
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: total == 0 ? null : progress,
+                                color: _accentColor,
+                                backgroundColor: AppTheme.surfaceVariant,
+                                minHeight: 8,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  running
+                                      ? '$processed / $total pistas'
+                                      : '$total pistas procesadas',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                                Text(
+                                  percent == '100' || finished
+                                      ? 'Completado'
+                                      : '$percent %',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: _accentColor,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (service.lastError != null) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: Colors.orange.withValues(
+                                      alpha: 0.35,
+                                    ),
+                                    width: 0.7,
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(
+                                      Icons.warning_amber_rounded,
+                                      size: 16,
+                                      color: Colors.orange,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        service.lastError!,
+                                        maxLines: 3,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                              color: Colors.orange,
+                                              height: 1.35,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    // Footer con botones gemelos
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: running
+                                  ? null
+                                  : () => Navigator.pop(sheetContext),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                side: BorderSide(
+                                  color: running
+                                      ? AppTheme.surfaceVariant.withValues(
+                                          alpha: 0.5,
+                                        )
+                                      : AppTheme.surfaceVariant,
+                                  width: 0.9,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: Text(running ? 'En curso…' : 'Cerrar'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: running
+                                  ? service.cancel
+                                  : () => Navigator.pop(sheetContext),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: running
+                                    ? Colors.red.shade600
+                                    : _accentColor,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor:
+                                    AppTheme.surfaceVariant,
+                                disabledForegroundColor: AppTheme.textSecondary,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              icon: Icon(
+                                running
+                                    ? Icons.stop_rounded
+                                    : Icons.check_rounded,
+                                size: 18,
+                              ),
+                              label: Text(running ? 'Detener' : 'Aceptar'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    // Espera a que el análisis termine de verdad antes de salir.
+    await future;
+  }
+
+  // ===========================================================================
+  // DIÁLOGO: REANALIZAR TODA LA BIBLIOTECA
+  // ===========================================================================
+
+  Future<void> _confirmReanalyze() async {
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+
+        return _buildSheetContainer(
+          context: sheetContext,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildSheetHandle(),
+              const SizedBox(height: 18),
+
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: AppTheme.surfaceVariant,
+                              width: 0.7,
+                            ),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                _accentColor,
+                                Color.lerp(_accentColor, Colors.black, 0.55)!,
+                              ],
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.refresh_rounded,
+                            color: Colors.white.withValues(alpha: 0.95),
+                            size: 34,
+                          ),
+                        ),
+                        Positioned(
+                          right: -6,
+                          bottom: -6,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _accentColor,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppTheme.surface,
+                                width: 3,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.auto_fix_high_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Reanalizar biblioteca',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Se recalcularán todas las ganancias.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Puede tardar bastante según el tamaño de tu biblioteca.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetContext, false),
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Cerrar',
+                      visualDensity: VisualDensity.compact,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Aviso informativo
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _accentColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _accentColor.withValues(alpha: 0.30),
+                      width: 0.7,
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 18,
+                        color: _accentColor,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Las ganancias actuales se sobrescribirán con los '
+                          'nuevos valores calculados.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppTheme.textSecondary,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Footer con botones gemelos
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(sheetContext, false),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(
+                            color: AppTheme.surfaceVariant,
+                            width: 0.9,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.pop(sheetContext, true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _accentColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: const Text('Reanalizar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await ReplayGainService.instance.analyzeLibrary(force: true);
+    }
+  }
+
+  // ===========================================================================
+  // DIÁLOGO: BORRAR GANANCIAS CALCULADAS
+  // ===========================================================================
+
+  Future<void> _confirmClearReplayGain() async {
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+
+        return _buildSheetContainer(
+          context: sheetContext,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildSheetHandle(),
+              const SizedBox(height: 18),
+
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: AppTheme.surfaceVariant,
+                              width: 0.7,
+                            ),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.red.shade600,
+                                Color.lerp(
+                                  Colors.red.shade600,
+                                  Colors.black,
+                                  0.55,
+                                )!,
+                              ],
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.delete_outline_rounded,
+                            color: Colors.white.withValues(alpha: 0.95),
+                            size: 34,
+                          ),
+                        ),
+                        Positioned(
+                          right: -6,
+                          bottom: -6,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade600,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppTheme.surface,
+                                width: 3,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.warning_amber_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Borrar ganancias',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Se eliminarán todas las ganancias calculadas.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Las pistas volverán a sonar sin normalización.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetContext, false),
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Cerrar',
+                      visualDensity: VisualDensity.compact,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Aviso de advertencia (rojo)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.30),
+                      width: 0.7,
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 18,
+                        color: Colors.red.shade600,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Esta acción no se puede deshacer. Deberás analizar '
+                          'de nuevo cada pista para recuperar la normalización.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppTheme.textSecondary,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Footer con botones gemelos
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(sheetContext, false),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(
+                            color: AppTheme.surfaceVariant,
+                            width: 0.9,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.pop(sheetContext, true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Borrar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await ReplayGainService.instance.clearAll();
+    }
   }
 
   Widget _buildLibraryCard(_LayoutSize layout) {

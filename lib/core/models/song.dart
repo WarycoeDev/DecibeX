@@ -12,6 +12,10 @@ class Song {
   final String? artworkPath;
   final String mediaType;
 
+  /// Ganancia ReplayGain calculada para este archivo, en dB.
+  /// `null` significa que aún no se ha analizado.
+  final double? replayGainDb;
+
   const Song({
     required this.title,
     required this.artist,
@@ -23,6 +27,7 @@ class Song {
     this.filePath,
     this.artworkPath,
     this.mediaType = 'music',
+    this.replayGainDb,
   });
 
   bool get isPodcast => mediaType == 'podcast';
@@ -38,6 +43,7 @@ class Song {
     String? filePath,
     String? artworkPath,
     String? mediaType,
+    double? replayGainDb,
   }) {
     return Song(
       title: title ?? this.title,
@@ -50,6 +56,7 @@ class Song {
       filePath: filePath ?? this.filePath,
       artworkPath: artworkPath ?? this.artworkPath,
       mediaType: mediaType ?? this.mediaType,
+      replayGainDb: replayGainDb ?? this.replayGainDb,
     );
   }
 
@@ -63,6 +70,7 @@ class Song {
       'filePath': filePath,
       'artworkPath': artworkPath,
       'mediaType': mediaType,
+      'replayGainDb': replayGainDb,
     };
   }
 
@@ -80,6 +88,9 @@ class Song {
           ? json['artworkPath'] as String
           : null,
       mediaType: json['mediaType'] == 'podcast' ? 'podcast' : 'music',
+      replayGainDb: json['replayGainDb'] is num
+          ? (json['replayGainDb'] as num).toDouble()
+          : null,
     );
   }
 }

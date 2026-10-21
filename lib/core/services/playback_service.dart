@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 
 import '../models/song.dart';
 import 'playback_queue.dart';
+import 'settings_service.dart';
 import 'statistics_service.dart';
 import 'podcast_statistics_service.dart';
 
@@ -95,6 +96,10 @@ class PlaybackService extends ChangeNotifier {
     _player.errorStream.listen((error) {
       debugPrint('[PlaybackService] Error de audio: $error');
     });
+
+    // Aplicar cambios de preamp/ReplayGain a la pista actual al instante
+    // (sin esperar a la siguiente canción).
+    SettingsService.instance.addListener(_onSettingsChanged);
   }
 
   static final PlaybackService instance = PlaybackService._();
@@ -122,6 +127,9 @@ class PlaybackService extends ChangeNotifier {
 
   Duration? _seekTarget;
   DateTime? _seekStartedAt;
+
+  // Volumen aplicado actualmente, para evitar setVolume redundantes.
+  double _lastAppliedVolume = 1.0;
 
   Song? get currentSong => _currentSong;
   Duration get position => _position;
@@ -165,6 +173,12 @@ class PlaybackService extends ChangeNotifier {
     return _currentQueueIndex >= 0 &&
         (_currentQueueIndex < _playingSongs.length - 1 ||
             (_repeatMode == LoopMode.all && _playingSongs.length > 1));
+  }
+
+  void _onSettingsChanged() {
+    final song = _currentSong;
+    if (song == null) return;
+    unawaited(_applyReplayGainVolume(song));
   }
 
   bool _sameSong(Song a, Song b) {
@@ -368,6 +382,9 @@ class PlaybackService extends ChangeNotifier {
       initialPosition: initialPosition,
     );
 
+    // Aplicar ReplayGain (por pista + preamp global).
+    await _applyReplayGainVolume(song);
+
     // El Future de play() solo se completa cuando la canción se pausa o
     // termina. Si se espera con await, _isLoading (y _handlingCompletion)
     // se quedan en true durante toda la canción y los botones de
@@ -377,6 +394,40 @@ class PlaybackService extends ChangeNotifier {
         debugPrint('[PlaybackService] Error al reproducir: $error');
       }),
     );
+  }
+
+  /// Aplica el volumen lineal derivado de:
+  ///   gain_dB = (replayGainDb de la pista, o 0 si no tiene) + preamp global
+  ///   factor  = 10^(gain_dB / 20)
+  ///
+  /// Reglas:
+  /// - Si `replayGainEnabled == false`: volumen 1.0 (sin tocar nada).
+  /// - Si `replayGainEnabled == true`:
+  ///     * pista con `replayGainDb`  → (gain + preamp)
+  ///     * pista sin `replayGainDb` → (0 + preamp)  ← el preamp SÍ actúa
+  /// - Clamp del factor a [0.0, 4.0] (+12 dB de amplificación máxima).
+  Future<void> _applyReplayGainVolume(Song song) async {
+    final settings = SettingsService.instance;
+
+    double target;
+
+    if (!settings.replayGainEnabled) {
+      target = 1.0;
+    } else {
+      final trackGainDb = song.replayGainDb ?? 0.0;
+      final totalGainDb = trackGainDb + settings.replayGainPreamp;
+
+      if (totalGainDb == 0) {
+        target = 1.0;
+      } else {
+        target = pow(10, totalGainDb / 20).toDouble().clamp(0.0, 4.0);
+      }
+    }
+
+    if ((target - _lastAppliedVolume).abs() < 0.001) return;
+
+    _lastAppliedVolume = target;
+    await _player.setVolume(target);
   }
 
   Future<void> appendToPlaybackQueue(Song song) async {
@@ -744,6 +795,7 @@ class PlaybackService extends ChangeNotifier {
     _handlingCompletion = false;
     _seekTarget = null;
     _seekStartedAt = null;
+    _lastAppliedVolume = 1.0;
 
     StatisticsService.instance.onSongChanged(null);
     PodcastStatisticsService.instance.onSongChanged(null);
@@ -754,6 +806,7 @@ class PlaybackService extends ChangeNotifier {
 
   @override
   void dispose() {
+    SettingsService.instance.removeListener(_onSettingsChanged);
     unawaited(PodcastStatisticsService.instance.flush());
     unawaited(_player.dispose());
     super.dispose();

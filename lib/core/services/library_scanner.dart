@@ -756,6 +756,8 @@ class LibraryScanner extends ChangeNotifier {
         'mediaType': mediaType,
         'modified': stat.modified.millisecondsSinceEpoch,
         'size': stat.size,
+        // Conserva la ganancia ReplayGain ya calculada (si existía).
+        'replayGainDb': previous?['replayGainDb'],
       };
     } catch (e) {
       if (_disposed) return;
@@ -772,6 +774,8 @@ class LibraryScanner extends ChangeNotifier {
         'mediaType': mediaType,
         'modified': previous?['modified'] ?? 0,
         'size': previous?['size'] ?? 0,
+        // Conserva la ganancia ReplayGain ya calculada (si existía).
+        'replayGainDb': previous?['replayGainDb'],
       };
 
       debugPrint('[LibraryScanner] No se pudo procesar "$path": $e');
@@ -810,6 +814,33 @@ class LibraryScanner extends ChangeNotifier {
     _songs = keyed.map((entry) => entry.value).toList();
     _notifyIfAlive();
   }
+
+  // ------------------------------------------------------------------
+  // ReplayGain por archivo
+  // ------------------------------------------------------------------
+
+  /// Guarda la ganancia ReplayGain calculada para [song] en el índice
+  /// en memoria y republica la lista. NO escribe el índice a disco: el
+  /// llamador controla el batching con [saveIndexNow].
+  Future<void> setReplayGain(Song song, double? gainDb) async {
+    if (_disposed) return;
+
+    final path = song.filePath;
+    if (path == null || !_index.containsKey(path)) return;
+
+    _index[path]!['replayGainDb'] = gainDb;
+    _publishSongs();
+  }
+
+  /// Persiste el índice actual en disco inmediatamente.
+  Future<void> saveIndexNow() async {
+    if (_disposed) return;
+    await _saveIndex();
+  }
+
+  // ------------------------------------------------------------------
+  // Favoritos
+  // ------------------------------------------------------------------
 
   List<Song> orderFavorites(Iterable<Song> songs) {
     final favorites = songs.where((song) => song.favorite).toList();
@@ -904,6 +935,10 @@ class LibraryScanner extends ChangeNotifier {
       _notifyIfAlive();
     }
   }
+
+  // ------------------------------------------------------------------
+  // Helpers
+  // ------------------------------------------------------------------
 
   String _extension(String path) {
     final name = path.split(Platform.pathSeparator).last;
