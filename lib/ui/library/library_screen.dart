@@ -20,6 +20,7 @@ import '../../core/models/playlist.dart';
 import '../../core/services/playlist_service.dart';
 import '../../core/services/podcast_statistics_service.dart'; // [PODCAST]
 
+import '../../features/library/playlist_name_sheet.dart';
 import '../../features/library/playlist_name_dialog.dart';
 
 enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
@@ -1311,14 +1312,13 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _createPlaylist() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const PlaylistNameDialog(
-        icon: Icons.queue_music_rounded,
-        title: 'Nueva playlist',
-        subtitle: 'Ponle un nombre para empezar a organizar tu música.',
-        confirmLabel: 'Crear',
-      ),
+    final name = await showPlaylistNameSheet(
+      context,
+      icon: Icons.queue_music_rounded,
+      title: 'Nueva playlist',
+      subtitle: 'Ponle un nombre para empezar a organizar tu música.',
+      confirmLabel: 'Crear',
+      badgeIcon: Icons.add_rounded,
     );
 
     if (name == null || !mounted) return;
@@ -1373,17 +1373,21 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _renamePlaylist(Playlist playlist) async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => PlaylistNameDialog(
-        icon: Icons.edit_rounded,
-        title: 'Renombrar playlist',
-        subtitle: 'Elige un nuevo nombre para "${playlist.name}".',
-        confirmLabel: 'Guardar',
-        initialName: playlist.name,
-      ),
+    final songs = _playlistService.resolveSongs(playlist);
+
+    final name = await showPlaylistNameSheet(
+      context,
+      icon: Icons.queue_music_rounded,
+      title: 'Renombrar playlist',
+      subtitle: 'Elige un nuevo nombre para "${playlist.name}".',
+      confirmLabel: 'Guardar',
+      initialName: playlist.name,
+      songs: songs,
+      badgeIcon: Icons.edit_rounded,
     );
+
     if (name == null || !mounted) return;
+
     try {
       await _playlistService.rename(playlist, name);
     } catch (_) {
