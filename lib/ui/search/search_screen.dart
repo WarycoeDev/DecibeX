@@ -67,6 +67,11 @@ class _SearchScreenState extends State<SearchScreen>
   _SearchFilter _selectedFilter = _SearchFilter.all;
   String _query = '';
 
+  /// Caché de resultados por combinación (query normalizada, filtro).
+  /// Se invalida al cambiar la query o el filtro.
+  final Map<String, List<Song>> _songsCache = {};
+  final Map<String, List<Song>> _groupedCache = {};
+
   @override
   void initState() {
     super.initState();
@@ -76,15 +81,22 @@ class _SearchScreenState extends State<SearchScreen>
       value: 1,
     );
     _scanner.initialize();
+    _scanner.addListener(_invalidateCache);
   }
 
   @override
   void dispose() {
+    _scanner.removeListener(_invalidateCache);
     _entryController.dispose();
     _controller.dispose();
     _focusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _invalidateCache() {
+    _songsCache.clear();
+    _groupedCache.clear();
   }
 
   bool _isUnknownAlbum(String album) {
@@ -97,6 +109,133 @@ class _SearchScreenState extends State<SearchScreen>
 
   String _normalize(String value) =>
       value.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
+
+  // ---------------------------------------------------------------
+  // Búsqueda difusa [NUEVO]
+  // ---------------------------------------------------------------
+
+  /// Normaliza texto: minúsculas, sin acentos, espacios colapsados.
+  String _normalizeFuzzy(String value) {
+    const accented = 'áàäâãéèëêíìïîóòöôõúùüûñç';
+    const plain = 'aaaaaeeeeiiiiooooouuuunc';
+    final buffer = StringBuffer();
+    for (final ch in value.toLowerCase().trim().split('')) {
+      final idx = accented.indexOf(ch);
+      buffer.write(idx >= 0 ? plain[idx] : ch);
+    }
+    return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Comprueba si [needle] es una subsecuencia de [haystack] (en orden).
+  /// Devuelve la cantidad de "saltos" (caracteres ignorados) o -1 si no.
+  int _subsequenceGaps(String needle, String haystack) {
+    if (needle.isEmpty) return -1;
+    int hi = 0;
+    int gaps = 0;
+    int lastMatch = -1;
+    for (int ni = 0; ni < needle.length; ni++) {
+      final target = needle[ni];
+      bool found = false;
+      while (hi < haystack.length) {
+        if (haystack[hi] == target) {
+          if (lastMatch >= 0 && hi > lastMatch + 1) {
+            gaps += hi - lastMatch - 1;
+          }
+          lastMatch = hi;
+          hi++;
+          found = true;
+          break;
+        }
+        hi++;
+      }
+      if (!found) return -1;
+    }
+    return gaps;
+  }
+
+  /// Distancia de Levenshtein (O(n·m) con memoria O(min(n,m))).
+  int _levenshtein(String a, String b) {
+    if (a == b) return 0;
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
+    if (a.length > b.length) {
+      final tmp = a;
+      a = b;
+      b = tmp;
+    }
+    final m = a.length;
+    final n = b.length;
+    var prev = List<int>.generate(m + 1, (i) => i);
+    var curr = List<int>.filled(m + 1, 0);
+    for (int j = 1; j <= n; j++) {
+      curr[0] = j;
+      for (int i = 1; i <= m; i++) {
+        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        curr[i] = [
+          curr[i - 1] + 1,
+          prev[i] + 1,
+          prev[i - 1] + cost,
+        ].reduce((x, y) => x < y ? x : y);
+      }
+      final tmp = prev;
+      prev = curr;
+      curr = tmp;
+    }
+    return prev[m];
+  }
+
+  /// Puntúa una canción contra [query] (ya normalizada).
+  /// Devuelve 0 si no hay coincidencia aceptable.
+  double _scoreSong(String query, Song song) {
+    if (query.isEmpty) return 0;
+
+    final haystack = _normalizeFuzzy(
+      '${song.title} ${song.artist} ${song.album}',
+    );
+
+    // 1) Subcadena exacta.
+    final idx = haystack.indexOf(query);
+    if (idx >= 0) {
+      final titleNorm = _normalizeFuzzy(song.title);
+      if (titleNorm.startsWith(query)) return 100;
+      if (haystack.startsWith(query)) return 95;
+      if (idx == 0 || haystack[idx - 1] == ' ') return 85;
+      return 80;
+    }
+
+    // Query muy corta: no aplicar difusa (demasiado ruido).
+    if (query.length < 2) return 0;
+
+    double best = 0;
+
+    // 2) Subsecuencia (todos los chars en orden).
+    final gaps = _subsequenceGaps(query, haystack);
+    if (gaps >= 0) {
+      final penalty = (gaps / (haystack.length + 1)).clamp(0.0, 0.6);
+      final subScore = 60.0 * (1.0 - penalty);
+      if (subScore > best) best = subScore;
+    }
+
+    // 3) Levenshtein sobre el campo más relevante (título primero).
+    final candidates = <String>[
+      _normalizeFuzzy(song.title),
+      _normalizeFuzzy(song.artist),
+      _normalizeFuzzy(song.album),
+    ];
+    for (final cand in candidates) {
+      if (cand.isEmpty) continue;
+      final dist = _levenshtein(query, cand);
+      final maxLen = query.length > cand.length ? query.length : cand.length;
+      if (maxLen == 0) continue;
+      final ratio = dist / maxLen;
+      if (ratio <= 0.4) {
+        final levScore = 50.0 * (1.0 - ratio / 0.4);
+        if (levScore > best) best = levScore;
+      }
+    }
+
+    return best;
+  }
 
   // ---------------------------------------------------------------
   // Reproducción [CONECTADO]
@@ -154,57 +293,103 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   // ---------------------------------------------------------------
-  // Resultados [CONECTADO a LibraryScanner]
+  // Resultados [CONECTADO a LibraryScanner + difusa]
   // ---------------------------------------------------------------
+
+  Iterable<Song> _sourceForFilter(_SearchFilter filter) {
+    switch (filter) {
+      case _SearchFilter.songs:
+        return _scanner.musicSongs;
+      case _SearchFilter.podcasts:
+        return _scanner.podcasts;
+      case _SearchFilter.all:
+        return _scanner.songs;
+      case _SearchFilter.artists:
+      case _SearchFilter.albums:
+        return _scanner.musicSongs;
+    }
+  }
 
   List<Song> _matchingSongs() {
     if (_query.isEmpty) return const [];
-    final q = _normalize(_query);
+    final q = _normalizeFuzzy(_query);
+    final cacheKey = '$q|${_selectedFilter.index}';
+    final cached = _songsCache[cacheKey];
+    if (cached != null) return cached;
 
-    final Iterable<Song> source;
-    switch (_selectedFilter) {
-      case _SearchFilter.songs:
-        source = _scanner.musicSongs;
-        break;
-      case _SearchFilter.podcasts:
-        source = _scanner.podcasts;
-        break;
-      case _SearchFilter.all:
-        source = _scanner.songs;
-        break;
-      case _SearchFilter.artists:
-      case _SearchFilter.albums:
-        source = _scanner.musicSongs;
-        break;
+    final scored = <_ScoredSong>[];
+    for (final song in _sourceForFilter(_selectedFilter)) {
+      final score = _scoreSong(q, song);
+      if (score > 0) {
+        scored.add(_ScoredSong(song, score));
+      }
     }
 
-    return source.where((song) {
-      final haystack = _normalize('${song.title} ${song.artist} ${song.album}');
-      return haystack.contains(q);
-    }).toList();
+    scored.sort((a, b) => b.score.compareTo(a.score));
+    final result = scored.map((e) => e.song).toList();
+    _songsCache[cacheKey] = result;
+    return result;
   }
 
+  /// Agrupa canciones de un tipo (artista/álbum/podcast) manteniendo
+  /// una canción representativa por grupo, ordenadas por relevancia difusa.
   List<Song> _groupedSongs({required bool isArtist, required bool isPodcast}) {
     if (_query.isEmpty) return const [];
-    final q = _normalize(_query);
-    final unique = <String, Song>{};
+    final q = _normalizeFuzzy(_query);
+    final cacheKey = 'g|$q|${isArtist ? 'a' : 'b'}|${isPodcast ? 'p' : 'm'}';
+    final cached = _groupedCache[cacheKey];
+    if (cached != null) return cached;
 
-    final Iterable<Song> source = isPodcast
-        ? _scanner.podcasts
-        : _scanner.musicSongs;
+    final unique = <String, _ScoredSong>{};
+    final source = isPodcast ? _scanner.podcasts : _scanner.musicSongs;
 
     for (final song in source) {
       final title = isArtist
           ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
           : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
 
-      if (!_normalize(title).contains(q)) continue;
+      final normTitle = _normalizeFuzzy(title);
+      double score = 0;
+
+      // Subcadena exacta.
+      final idx = normTitle.indexOf(q);
+      if (idx >= 0) {
+        score = idx == 0 ? 100 : 80;
+      } else if (q.length >= 2) {
+        // Subsecuencia.
+        final gaps = _subsequenceGaps(q, normTitle);
+        if (gaps >= 0) {
+          final penalty = (gaps / (normTitle.length + 1)).clamp(0.0, 0.6);
+          score = 60.0 * (1.0 - penalty);
+        }
+        // Levenshtein.
+        final dist = _levenshtein(q, normTitle);
+        final maxLen = q.length > normTitle.length
+            ? q.length
+            : normTitle.length;
+        if (maxLen > 0) {
+          final ratio = dist / maxLen;
+          if (ratio <= 0.4) {
+            final levScore = 50.0 * (1.0 - ratio / 0.4);
+            if (levScore > score) score = levScore;
+          }
+        }
+      }
+
+      if (score <= 0) continue;
 
       final key = isArtist ? title : '${song.artist}\u0000$title';
-      unique.putIfAbsent(key, () => song);
+      final existing = unique[key];
+      if (existing == null || score > existing.score) {
+        unique[key] = _ScoredSong(song, score);
+      }
     }
 
-    return unique.values.toList();
+    final list = unique.values.toList()
+      ..sort((a, b) => b.score.compareTo(a.score));
+    final result = list.map((e) => e.song).toList();
+    _groupedCache[cacheKey] = result;
+    return result;
   }
 
   // ---------------------------------------------------------------
@@ -212,6 +397,7 @@ class _SearchScreenState extends State<SearchScreen>
   // ---------------------------------------------------------------
 
   void _onQueryChanged(String value) {
+    _invalidateCache();
     setState(() => _query = value);
     _entryController.forward(from: 0);
   }
@@ -224,6 +410,7 @@ class _SearchScreenState extends State<SearchScreen>
 
   void _selectFilter(_SearchFilter filter) {
     if (filter == _selectedFilter) return;
+    _invalidateCache();
     setState(() => _selectedFilter = filter);
     _entryController.forward(from: 0);
   }
@@ -237,8 +424,6 @@ class _SearchScreenState extends State<SearchScreen>
   }) {
     final callback = widget.onOpenDetail;
     if (callback != null) {
-      // Se descarta el Future (si lo hay): el callback se encarga de
-      // esperar internamente a que la biblioteca esté lista.
       callback(
         title: title,
         artist: artist,
@@ -819,6 +1004,12 @@ class _SearchScreenState extends State<SearchScreen>
 // -----------------------------------------------------------------
 // Widgets auxiliares
 // -----------------------------------------------------------------
+
+class _ScoredSong {
+  final Song song;
+  final double score;
+  const _ScoredSong(this.song, this.score);
+}
 
 class _SearchFilterData {
   final _SearchFilter filter;
