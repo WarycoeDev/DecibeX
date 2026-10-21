@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../models/song.dart';
+import 'fade_index.dart';
 import 'playback_queue.dart';
 import 'settings_service.dart';
 import 'statistics_service.dart';
@@ -27,6 +28,7 @@ class PlaybackService extends ChangeNotifier {
         _seekStartedAt = null;
       }
 
+      _syncFadeTimer();
       notifyListeners();
     });
 
@@ -97,8 +99,8 @@ class PlaybackService extends ChangeNotifier {
       debugPrint('[PlaybackService] Error de audio: $error');
     });
 
-    // Aplicar cambios de preamp/ReplayGain a la pista actual al instante
-    // (sin esperar a la siguiente canción).
+    // Cambios de preamp / ReplayGain / fades se aplican a la pista actual
+    // al instante (sin esperar a la siguiente canción).
     SettingsService.instance.addListener(_onSettingsChanged);
   }
 
@@ -128,8 +130,19 @@ class PlaybackService extends ChangeNotifier {
   Duration? _seekTarget;
   DateTime? _seekStartedAt;
 
-  // Volumen aplicado actualmente, para evitar setVolume redundantes.
-  double _lastAppliedVolume = 1.0;
+  // --- Volumen / fades ---
+
+  /// Último volumen enviado al reproductor (-1 = desconocido).
+  double _lastAppliedVolume = -1;
+
+  /// Frecuencia con la que se reevalúa el volumen mientras suena la pista.
+  static const Duration _fadeTick = Duration(milliseconds: 40);
+  Timer? _fadeTimer;
+
+  /// Índice "posición → ganancia" y la clave (fadeIn ms, fadeOut ms,
+  /// duración ms) con la que se construyó.
+  FadeIndex? _fadeIndex;
+  (int, int, int)? _fadeIndexKey;
 
   Song? get currentSong => _currentSong;
   Duration get position => _position;
@@ -176,9 +189,10 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _onSettingsChanged() {
-    final song = _currentSong;
-    if (song == null) return;
-    unawaited(_applyReplayGainVolume(song));
+    _syncFadeTimer();
+
+    if (_currentSong == null) return;
+    unawaited(_applyVolume());
   }
 
   bool _sameSong(Song a, Song b) {
@@ -342,6 +356,111 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
+  // ===========================================================================
+  // VOLUMEN · FADE IN / FADE OUT
+  //
+  // El volumen final es siempre:
+  //
+  //     volumen = baseVolume(ReplayGain + preamp) × FadeIndex.gainAt(posición)
+  //
+  // Al depender solo de la posición (no del tiempo transcurrido), el seek, la
+  // pausa y la reanudación funcionan sin lógica adicional. La duración de
+  // cada fade sale de SettingsService.
+  // ===========================================================================
+
+  /// Envía un volumen al reproductor sin ninguna comprobación.
+  Future<void> _setVolumeRaw(double volume) async {
+    _lastAppliedVolume = volume;
+    await _player.setVolume(volume);
+  }
+
+  /// Devuelve el índice vigente, reconstruyéndolo si cambió la duración de
+  /// algún fade (settings) o la duración de la pista.
+  FadeIndex? _currentFadeIndex() {
+    final settings = SettingsService.instance;
+
+    final inMs = settings.fadeInEnabled
+        ? (settings.fadeInDuration * 1000).round()
+        : 0;
+    final outMs = settings.fadeOutEnabled
+        ? (settings.fadeOutDuration * 1000).round()
+        : 0;
+
+    if (inMs <= 0 && outMs <= 0) return null;
+
+    final trackMs = _duration.inMilliseconds;
+    final key = (inMs, outMs, trackMs);
+
+    if (_fadeIndex == null || _fadeIndexKey != key) {
+      _fadeIndex = FadeIndex.build(
+        fadeIn: Duration(milliseconds: inMs),
+        fadeOut: Duration(milliseconds: outMs),
+        track: _duration,
+      );
+      _fadeIndexKey = key;
+    }
+
+    return _fadeIndex;
+  }
+
+  /// Volumen base derivado de ReplayGain (por pista + preamp global).
+  double _baseVolume(Song song) {
+    final settings = SettingsService.instance;
+
+    if (!settings.replayGainEnabled) return 1.0;
+
+    final trackGainDb = song.replayGainDb ?? 0.0;
+    final totalGainDb = trackGainDb + settings.replayGainPreamp;
+
+    if (totalGainDb == 0) return 1.0;
+
+    return pow(10, totalGainDb / 20).toDouble().clamp(0.0, 4.0);
+  }
+
+  /// Calcula y aplica el volumen que toca en [at] (por defecto, la posición
+  /// real del reproductor). Solo llama al plugin si el valor cambió.
+  Future<void> _applyVolume({Duration? at, bool force = false}) async {
+    final song = _currentSong;
+    if (song == null) return;
+
+    final position = at ?? _player.position;
+    final fadeGain = _currentFadeIndex()?.gainAt(position) ?? 1.0;
+    final target = (_baseVolume(song) * fadeGain).clamp(0.0, 4.0).toDouble();
+
+    if (!force) {
+      // Los extremos (0 absoluto y volumen pleno) nunca se omiten por
+      // tolerancia: tienen que alcanzarse exactos.
+      final isEndpoint = target == 0.0 || fadeGain >= 1.0;
+      final unchanged = isEndpoint
+          ? target == _lastAppliedVolume
+          : (target - _lastAppliedVolume).abs() < 0.001;
+
+      if (unchanged) return;
+    }
+
+    await _setVolumeRaw(target);
+  }
+
+  /// El timer corre solo mientras suena la pista y hay algún fade activo.
+  void _syncFadeTimer() {
+    final settings = SettingsService.instance;
+    final needed =
+        _isPlaying && (settings.fadeInEnabled || settings.fadeOutEnabled);
+
+    if (needed) {
+      _fadeTimer ??= Timer.periodic(_fadeTick, (_) {
+        unawaited(_applyVolume());
+      });
+    } else {
+      _fadeTimer?.cancel();
+      _fadeTimer = null;
+    }
+  }
+
+  // ===========================================================================
+  // REPRODUCCIÓN
+  // ===========================================================================
+
   Future<void> _loadAndPlaySong(Song song) async {
     final path = song.filePath;
 
@@ -377,13 +496,24 @@ class PlaybackService extends ChangeNotifier {
         ? PodcastStatisticsService.instance.resumePositionFor(song)
         : Duration.zero;
 
-    await _player.setAudioSource(
+    // Silencio absoluto ANTES de cargar la nueva fuente: si el reproductor
+    // sigue en "playing", empezaría a sonar en cuanto estuviera listo y se
+    // escaparía audio con el volumen de la pista anterior.
+    await _setVolumeRaw(0.0);
+
+    final loadedDuration = await _player.setAudioSource(
       AudioSource.file(path, tag: song),
       initialPosition: initialPosition,
     );
 
-    // Aplicar ReplayGain (por pista + preamp global).
-    await _applyReplayGainVolume(song);
+    // Con la duración conocida ya se puede construir el índice completo.
+    if (loadedDuration != null) {
+      _duration = loadedDuration;
+    }
+
+    // Volumen que toca en la posición inicial: 0.0 absoluto si hay fade in
+    // y se arranca en 0; el volumen base en caso contrario.
+    await _applyVolume(at: initialPosition, force: true);
 
     // El Future de play() solo se completa cuando la canción se pausa o
     // termina. Si se espera con await, _isLoading (y _handlingCompletion)
@@ -394,40 +524,6 @@ class PlaybackService extends ChangeNotifier {
         debugPrint('[PlaybackService] Error al reproducir: $error');
       }),
     );
-  }
-
-  /// Aplica el volumen lineal derivado de:
-  ///   gain_dB = (replayGainDb de la pista, o 0 si no tiene) + preamp global
-  ///   factor  = 10^(gain_dB / 20)
-  ///
-  /// Reglas:
-  /// - Si `replayGainEnabled == false`: volumen 1.0 (sin tocar nada).
-  /// - Si `replayGainEnabled == true`:
-  ///     * pista con `replayGainDb`  → (gain + preamp)
-  ///     * pista sin `replayGainDb` → (0 + preamp)  ← el preamp SÍ actúa
-  /// - Clamp del factor a [0.0, 4.0] (+12 dB de amplificación máxima).
-  Future<void> _applyReplayGainVolume(Song song) async {
-    final settings = SettingsService.instance;
-
-    double target;
-
-    if (!settings.replayGainEnabled) {
-      target = 1.0;
-    } else {
-      final trackGainDb = song.replayGainDb ?? 0.0;
-      final totalGainDb = trackGainDb + settings.replayGainPreamp;
-
-      if (totalGainDb == 0) {
-        target = 1.0;
-      } else {
-        target = pow(10, totalGainDb / 20).toDouble().clamp(0.0, 4.0);
-      }
-    }
-
-    if ((target - _lastAppliedVolume).abs() < 0.001) return;
-
-    _lastAppliedVolume = target;
-    await _player.setVolume(target);
   }
 
   Future<void> appendToPlaybackQueue(Song song) async {
@@ -566,6 +662,10 @@ class PlaybackService extends ChangeNotifier {
       if (_player.processingState == ProcessingState.completed) {
         await _loadAndPlaySong(_currentSong!);
       } else {
+        // El volumen que toca en la posición actual (si se pausó a mitad de
+        // un fade, continúa desde ahí).
+        await _applyVolume(force: true);
+
         unawaited(
           _player.play().catchError((Object error) {
             debugPrint('[PlaybackService] Error al reanudar: $error');
@@ -738,6 +838,12 @@ class PlaybackService extends ChangeNotifier {
     _handlingCompletion = true;
 
     try {
+      // Garantía final: la pista termina en silencio absoluto aunque el
+      // último tick del timer no haya llegado a tiempo.
+      if (SettingsService.instance.fadeOutEnabled) {
+        await _setVolumeRaw(0.0);
+      }
+
       PodcastStatisticsService.instance.onTrackCompleted();
 
       if (_repeatMode == LoopMode.one) {
@@ -752,6 +858,7 @@ class PlaybackService extends ChangeNotifier {
       } else {
         _isPlaying = false;
         _position = _duration;
+        _syncFadeTimer();
         notifyListeners();
       }
     } catch (error) {
@@ -769,6 +876,11 @@ class PlaybackService extends ChangeNotifier {
     StatisticsService.instance.onSeek(position);
     PodcastStatisticsService.instance.onSeek(position);
 
+    // Volumen que toca en la posición de destino, aplicado ya (antes de que
+    // el audio salte): al saltar dentro de un fade, suena en su nivel
+    // correcto; al saltar fuera de uno, vuelve a volumen pleno.
+    unawaited(_applyVolume(at: position));
+
     notifyListeners();
 
     await _player.seek(position);
@@ -780,6 +892,12 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _fadeTimer?.cancel();
+    _fadeTimer = null;
+    _fadeIndex = null;
+    _fadeIndexKey = null;
+    _lastAppliedVolume = -1;
+
     await _player.stop();
 
     _playingSongs = [];
@@ -795,7 +913,6 @@ class PlaybackService extends ChangeNotifier {
     _handlingCompletion = false;
     _seekTarget = null;
     _seekStartedAt = null;
-    _lastAppliedVolume = 1.0;
 
     StatisticsService.instance.onSongChanged(null);
     PodcastStatisticsService.instance.onSongChanged(null);
@@ -806,6 +923,7 @@ class PlaybackService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _fadeTimer?.cancel();
     SettingsService.instance.removeListener(_onSettingsChanged);
     unawaited(PodcastStatisticsService.instance.flush());
     unawaited(_player.dispose());

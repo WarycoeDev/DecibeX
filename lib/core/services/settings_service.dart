@@ -282,6 +282,7 @@ class SettingsService extends ChangeNotifier {
       final file = await _settingsFile();
       final json = const JsonEncoder.withIndent('  ').convert(serialize());
       await file.writeAsString(json, flush: true);
+      _notifyIfAlive(); // <-- nuevo
     } catch (e) {
       debugPrint('[SettingsService] Error guardando settings: $e');
     }
