@@ -708,8 +708,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _updateSetting(() {
               _replayGainEnabled = value;
             });
-            // Notificación inmediata: PlaybackService lo verá en la
-            // siguiente pista sin esperar al watcher del archivo.
             SettingsService.instance.setReplayGainEnabled(value);
           },
         ),
@@ -719,7 +717,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: _SettingSlider(
             icon: Icons.volume_up_rounded,
             title: 'ReplayGain preamp',
-            subtitle: 'Se suma a la ganancia calculada de cada pista.',
+            subtitle: 'Se suma a la ganancia de cada pista.',
             value: _replayGainPreamp,
             min: -12,
             max: 12,
@@ -728,14 +726,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             valueLabel:
                 '${_replayGainPreamp >= 0 ? "+" : ""}'
                 '${_replayGainPreamp.toStringAsFixed(1)} dB',
-            // Siempre activo: se puede configurar antes de activar
-            // ReplayGain; solo surte efecto cuando ReplayGain está ON.
             enabled: true,
+            // showRangeLabels por defecto = true → muestra -12 dB / +12 dB
             onChanged: (value) {
               setState(() {
                 _replayGainPreamp = value;
               });
-              // Notificación inmediata al PlaybackService.
               SettingsService.instance.setReplayGainPreamp(value);
             },
             onChangeEnd: (_) => _saveSettings(),
@@ -2080,6 +2076,7 @@ class _SettingSlider extends StatelessWidget {
   final bool enabled;
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
+  final bool showRangeLabels;
 
   const _SettingSlider({
     required this.icon,
@@ -2094,6 +2091,7 @@ class _SettingSlider extends StatelessWidget {
     required this.enabled,
     required this.onChanged,
     required this.onChangeEnd,
+    this.showRangeLabels = true,
   });
 
   @override
@@ -2163,26 +2161,27 @@ class _SettingSlider extends StatelessWidget {
               onChangeEnd: enabled ? onChangeEnd : null,
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  min == -12 ? '-12 dB' : '0 s',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppTheme.textSecondary,
+          if (showRangeLabels)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    min == -12 ? '-12 dB' : '0 s',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
-                ),
-                Text(
-                  max == 12 ? '+12 dB' : '10 s',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppTheme.textSecondary,
+                  Text(
+                    max == 12 ? '+12 dB' : '10 s',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
