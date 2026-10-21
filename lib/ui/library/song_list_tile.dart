@@ -25,7 +25,33 @@ class SongListTile extends StatelessWidget {
     this.onFavoriteChanged,
   });
 
-  String get _displayTitle {
+  String get _displayTitle => displayTitleFor(song);
+
+  // ---------------------------------------------------------------------------
+  // API estática reutilizable por otras pantallas (p. ej. HomeScreen)
+  // ---------------------------------------------------------------------------
+
+  /// Abre el bottom sheet de acciones rápidas (reproducir / cola / playlist).
+  /// Equivalente al tap normal sobre un [SongListTile].
+  static Future<void> showSongActions(BuildContext context, Song song) {
+    return _showSongActionsSheet(context, song);
+  }
+
+  /// Abre el menú contextual completo (incluye favoritos).
+  /// Equivalente al long-press sobre un [SongListTile].
+  static Future<void> showContextMenu(
+    BuildContext context,
+    Song song, {
+    ValueChanged<bool>? onFavoriteChanged,
+  }) {
+    return _showContextMenuSheet(
+      context,
+      song,
+      onFavoriteChanged: onFavoriteChanged,
+    );
+  }
+
+  static String displayTitleFor(Song song) {
     final path = song.filePath;
 
     if (path == null || path.isEmpty) return song.title;
@@ -37,7 +63,27 @@ class SongListTile extends StatelessWidget {
     return baseName.isEmpty ? song.title : baseName;
   }
 
-  Future<void> _onSongTap(BuildContext context) async {
+  // ---------------------------------------------------------------------------
+  // Instancia
+  // ---------------------------------------------------------------------------
+
+  Future<void> _onSongTap(BuildContext context) =>
+      _showSongActionsSheet(context, song);
+
+  Future<void> _showContextMenu(BuildContext context) => _showContextMenuSheet(
+    context,
+    song,
+    onFavoriteChanged: onFavoriteChanged,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Implementación compartida (estática)
+  // ---------------------------------------------------------------------------
+
+  static Future<void> _showSongActionsSheet(
+    BuildContext context,
+    Song song,
+  ) async {
     final queue = PlaybackQueue.instance;
     final playback = PlaybackService.instance;
 
@@ -50,13 +96,13 @@ class SongListTile extends StatelessWidget {
 
     final alreadyQueued = queue.contains(song);
 
-    // [NUEVO] Aseguramos que las playlists estén cargadas antes de decidir
-    // si mostramos "Añadir a playlist" o "Crear playlist".
     final playlistService = PlaylistService.instance;
     try {
       await playlistService.initialize();
     } catch (_) {}
     final hasPlaylists = playlistService.playlists.isNotEmpty;
+
+    if (!context.mounted) return;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -64,7 +110,7 @@ class SongListTile extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -74,15 +120,15 @@ class SongListTile extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                   child: ScrollingTitle(
-                    title: _displayTitle,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    title: displayTitleFor(song),
+                    style: Theme.of(sheetContext).textTheme.titleMedium,
                     textAlign: TextAlign.center,
                   ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.playlist_remove_rounded),
                   title: const Text('Sobrescribir cola'),
-                  onTap: () => Navigator.pop(context, 'replace'),
+                  onTap: () => Navigator.pop(sheetContext, 'replace'),
                 ),
                 ListTile(
                   leading: Icon(
@@ -93,23 +139,22 @@ class SongListTile extends StatelessWidget {
                   title: Text(
                     alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
                   ),
-                  onTap: () => Navigator.pop(context, 'toggle'),
+                  onTap: () => Navigator.pop(sheetContext, 'toggle'),
                 ),
-                // [MODIFICADO] Etiqueta y acción condicionales.
                 ListTile(
                   leading: const Icon(Icons.library_music_rounded),
                   title: Text(
                     hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
                   ),
                   onTap: () => Navigator.pop(
-                    context,
+                    sheetContext,
                     hasPlaylists ? 'playlist' : 'create_playlist',
                   ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
                   title: const Text('Cancelar'),
-                  onTap: () => Navigator.pop(context, 'cancel'),
+                  onTap: () => Navigator.pop(sheetContext, 'cancel'),
                 ),
               ],
             ),
@@ -123,24 +168,160 @@ class SongListTile extends StatelessWidget {
     }
 
     if (action == 'create_playlist') {
-      await _createPlaylistThenAddSong(context);
+      await _createPlaylistThenAddSong(context, song);
       return;
     }
 
     if (action == 'playlist') {
-      await _showAddToPlaylistDialog(context);
+      await _showAddToPlaylistDialog(context, song);
       return;
     }
 
-    await _handleQueueAction(action);
+    await _handleQueueAction(action, song);
   }
 
-  /// [NUEVO] Crea una playlist con el diálogo compartido y, al terminar,
-  /// abre el selector de playlists para añadir la canción.
-  Future<void> _createPlaylistThenAddSong(BuildContext context) async {
+  static Future<void> _showContextMenuSheet(
+    BuildContext context,
+    Song song, {
+    ValueChanged<bool>? onFavoriteChanged,
+  }) async {
+    final queue = PlaybackQueue.instance;
+    final alreadyQueued = queue.contains(song);
+    final queueIsEmpty = queue.isEmpty;
+
+    final playlistService = PlaylistService.instance;
+    try {
+      await playlistService.initialize();
+    } catch (_) {}
+    final hasPlaylists = playlistService.playlists.isNotEmpty;
+
+    if (!context.mounted) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surfaceVariant,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Row(
+                    children: [
+                      _SongArtwork(song: song, size: 44),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ScrollingTitle(
+                              title: displayTitleFor(song),
+                              style: Theme.of(
+                                sheetContext,
+                              ).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(sheetContext).textTheme.bodySmall
+                                  ?.copyWith(color: AppTheme.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!queueIsEmpty)
+                  ListTile(
+                    leading: const Icon(Icons.playlist_remove_rounded),
+                    title: const Text('Sobrescribir cola'),
+                    onTap: () => Navigator.pop(sheetContext, 'replace'),
+                  ),
+                ListTile(
+                  leading: Icon(
+                    alreadyQueued
+                        ? Icons.remove_circle_outline_rounded
+                        : Icons.playlist_add_rounded,
+                  ),
+                  title: Text(
+                    alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'toggle'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.library_music_rounded),
+                  title: Text(
+                    hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
+                  ),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    hasPlaylists ? 'playlist' : 'create_playlist',
+                  ),
+                ),
+                if (onFavoriteChanged != null)
+                  ListTile(
+                    leading: Icon(
+                      song.favorite
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: song.favorite ? AppTheme.accent : null,
+                    ),
+                    title: Text(
+                      song.favorite
+                          ? 'Quitar de favoritos'
+                          : 'Agregar a favoritos',
+                    ),
+                    onTap: () => Navigator.pop(sheetContext, 'favorite'),
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.close_rounded),
+                  title: const Text('Cancelar'),
+                  onTap: () => Navigator.pop(sheetContext, 'cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!context.mounted || action == null || action == 'cancel') {
+      return;
+    }
+
+    if (action == 'favorite') {
+      onFavoriteChanged?.call(!song.favorite);
+      return;
+    }
+
+    if (action == 'create_playlist') {
+      await _createPlaylistThenAddSong(context, song);
+      return;
+    }
+
+    if (action == 'playlist') {
+      await _showAddToPlaylistDialog(context, song);
+      return;
+    }
+
+    await _handleQueueAction(action, song);
+  }
+
+  static Future<void> _createPlaylistThenAddSong(
+    BuildContext context,
+    Song song,
+  ) async {
     final service = PlaylistService.instance;
 
-    // 1) Diálogo de creación (reutiliza el de LibraryScreen).
     final name = await showDialog<String>(
       context: context,
       builder: (_) => const PlaylistNameDialog(
@@ -153,7 +334,6 @@ class SongListTile extends StatelessWidget {
 
     if (name == null || !context.mounted) return;
 
-    // 2) Crear la playlist.
     try {
       await service.create(name);
     } catch (_) {
@@ -162,11 +342,10 @@ class SongListTile extends StatelessWidget {
 
     if (!context.mounted) return;
 
-    // 3) Abrir el diálogo de selección de playlists para añadir la canción.
-    await _showAddToPlaylistDialog(context);
+    await _showAddToPlaylistDialog(context, song);
   }
 
-  Future<void> _handleQueueAction(String action) async {
+  static Future<void> _handleQueueAction(String action, Song song) async {
     final queue = PlaybackQueue.instance;
     final playback = PlaybackService.instance;
 
@@ -197,7 +376,10 @@ class SongListTile extends StatelessWidget {
     }
   }
 
-  Future<void> _showAddToPlaylistDialog(BuildContext context) async {
+  static Future<void> _showAddToPlaylistDialog(
+    BuildContext context,
+    Song song,
+  ) async {
     final service = PlaylistService.instance;
 
     if (song.filePath == null || song.filePath!.isEmpty) return;
@@ -213,13 +395,11 @@ class SongListTile extends StatelessWidget {
 
       final songPath = song.filePath!;
 
-      // Playlists que ya contenían esta canción al abrir el diálogo.
       final initiallyContaining = <String>{
         for (final playlist in playlists)
           if (playlist.songPaths.contains(songPath)) playlist.id,
       };
 
-      // Estado seleccionado actual (arranca igual que el inicial).
       final selectedIds = <String>{...initiallyContaining};
 
       final selectedPlaylists = await showModalBottomSheet<List<Playlist>>(
@@ -261,7 +441,6 @@ class SongListTile extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Handle superior
                         Padding(
                           padding: const EdgeInsets.only(top: 14),
                           child: Container(
@@ -274,8 +453,6 @@ class SongListTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 18),
-
-                        // Header: carátula de la canción con badge + título
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Row(
@@ -335,7 +512,7 @@ class SongListTile extends StatelessWidget {
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
-                                      _displayTitle,
+                                      displayTitleFor(song),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.bodyMedium
@@ -367,8 +544,6 @@ class SongListTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 18),
-
-                        // Subheader con contador
                         Padding(
                           padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
                           child: Row(
@@ -407,8 +582,6 @@ class SongListTile extends StatelessWidget {
                             ],
                           ),
                         ),
-
-                        // Lista de playlists
                         Flexible(
                           child: ListView.builder(
                             shrinkWrap: true,
@@ -534,8 +707,6 @@ class SongListTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 12),
-
-                        // Botones
                         Padding(
                           padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                           child: Row(
@@ -610,7 +781,6 @@ class SongListTile extends StatelessWidget {
 
       if (!context.mounted || selectedPlaylists == null) return;
 
-      // Aplicar cambios: añadir a las nuevas, quitar de las deseleccionadas.
       final toAdd = selectedPlaylists
           .where((p) => !initiallyContaining.contains(p.id))
           .toList();
@@ -634,140 +804,6 @@ class SongListTile extends StatelessWidget {
     } catch (_) {
       return;
     }
-  }
-
-  Future<void> _showContextMenu(BuildContext context) async {
-    final queue = PlaybackQueue.instance;
-    final alreadyQueued = queue.contains(song);
-    final queueIsEmpty = queue.isEmpty;
-
-    // [NUEVO] Mismo chequeo que en _onSongTap para el long-press.
-    final playlistService = PlaylistService.instance;
-    try {
-      await playlistService.initialize();
-    } catch (_) {}
-    final hasPlaylists = playlistService.playlists.isNotEmpty;
-
-    if (!context.mounted) return;
-
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppTheme.surfaceVariant,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                  child: Row(
-                    children: [
-                      _SongArtwork(song: song, size: 44),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ScrollingTitle(
-                              title: _displayTitle,
-                              style: Theme.of(
-                                sheetContext,
-                              ).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              song.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(sheetContext).textTheme.bodySmall
-                                  ?.copyWith(color: AppTheme.textSecondary),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (!queueIsEmpty)
-                  ListTile(
-                    leading: const Icon(Icons.playlist_remove_rounded),
-                    title: const Text('Sobrescribir cola'),
-                    onTap: () => Navigator.pop(sheetContext, 'replace'),
-                  ),
-                ListTile(
-                  leading: Icon(
-                    alreadyQueued
-                        ? Icons.remove_circle_outline_rounded
-                        : Icons.playlist_add_rounded,
-                  ),
-                  title: Text(
-                    alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
-                  ),
-                  onTap: () => Navigator.pop(sheetContext, 'toggle'),
-                ),
-                // [MODIFICADO] Etiqueta y acción condicionales.
-                ListTile(
-                  leading: const Icon(Icons.library_music_rounded),
-                  title: Text(
-                    hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
-                  ),
-                  onTap: () => Navigator.pop(
-                    sheetContext,
-                    hasPlaylists ? 'playlist' : 'create_playlist',
-                  ),
-                ),
-                if (onFavoriteChanged != null)
-                  ListTile(
-                    leading: Icon(
-                      song.favorite
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      color: song.favorite ? AppTheme.accent : null,
-                    ),
-                    title: Text(
-                      song.favorite
-                          ? 'Quitar de favoritos'
-                          : 'Agregar a favoritos',
-                    ),
-                    onTap: () => Navigator.pop(sheetContext, 'favorite'),
-                  ),
-                ListTile(
-                  leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
-                  onTap: () => Navigator.pop(sheetContext, 'cancel'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (!context.mounted || action == null || action == 'cancel') {
-      return;
-    }
-
-    if (action == 'favorite') {
-      onFavoriteChanged?.call(!song.favorite);
-      return;
-    }
-
-    if (action == 'create_playlist') {
-      await _createPlaylistThenAddSong(context);
-      return;
-    }
-
-    if (action == 'playlist') {
-      await _showAddToPlaylistDialog(context);
-      return;
-    }
-
-    await _handleQueueAction(action);
   }
 
   @override

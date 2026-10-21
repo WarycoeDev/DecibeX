@@ -128,6 +128,47 @@ class _HomeScreenState extends State<HomeScreen> {
     await playback.playSongFromQueue(song);
   }
 
+  Future<void> _playAllMostPlayed(List<Song> songs) async {
+    if (songs.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (queue.isNotEmpty) {
+      final action = await _confirmQueueOverwrite();
+      if (!mounted || action != 'replace') return;
+    }
+
+    queue.clear();
+    for (final song in songs) {
+      queue.add(song);
+    }
+
+    await playback.playQueue();
+  }
+
+  Future<void> _addAllMostPlayedToQueue(List<Song> songs) async {
+    if (songs.isEmpty) return;
+
+    final queue = PlaybackQueue.instance;
+    final playback = PlaybackService.instance;
+
+    if (queue.isNotEmpty) {
+      final action = await _confirmQueueOverwrite();
+      if (!mounted || action != 'replace') return;
+    }
+
+    queue.clear();
+    for (final song in songs) {
+      queue.add(song);
+    }
+
+    await playback.playQueue();
+
+    if (!mounted) return;
+    await playback.pause();
+  }
+
   Future<void> _playAllFavorites(List<Song> favorites) async {
     if (favorites.isEmpty) return;
 
@@ -248,13 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ? 24
                               : (layout == _LayoutSize.expanded ? 40 : 36),
                         ),
-                        _buildSectionTitle(
-                          context,
-                          title: 'Más escuchadas',
-                          subtitle: 'Las canciones que más suenan',
-                          icon: Icons.trending_up_rounded,
-                          layout: layout,
-                        ),
+                        _buildMostPlayedHeader(context, mostPlayed, layout),
                         SizedBox(
                           height: isCompact
                               ? 16
@@ -333,11 +368,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSectionTitle(
+  /// Header genérico con icono, título, subtítulo y controles a la derecha.
+  Widget _buildSectionHeader(
     BuildContext context, {
     required String title,
     required String subtitle,
     required IconData icon,
+    required List<Widget> actions,
     required _LayoutSize layout,
   }) {
     final theme = Theme.of(context);
@@ -347,6 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final boxSize = isDesktop ? 44.0 : (isCompact ? 36.0 : 40.0);
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
           width: boxSize,
@@ -382,95 +420,80 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        const SizedBox(width: 8),
+        ...actions,
       ],
     );
   }
 
-  /// Título "Tus favoritos" + subtítulo en una columna, pero los controles
-  /// de reproducción siempre alineados a la derecha en la MISMA línea que el
-  /// título. El subtítulo queda debajo del título (no de los botones).
-  Widget _buildFavoritesHeader(
-    BuildContext context,
-    List<Song> favorites,
-    _LayoutSize layout,
-  ) {
-    final theme = Theme.of(context);
+  List<Widget> _buildCollectionActions({
+    required _LayoutSize layout,
+    required bool isEmpty,
+    required VoidCallback? onAddAll,
+    required VoidCallback? onPlayAll,
+  }) {
     final isDesktop = layout == _LayoutSize.expanded;
     final isCompact = layout == _LayoutSize.compact;
 
-    final boxSize = isDesktop ? 44.0 : (isCompact ? 36.0 : 40.0);
-
-    final titleBlock = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Tus favoritos',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          'Tu colección personal',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: AppTheme.textSecondary,
-          ),
-        ),
-      ],
-    );
-
-    final actions = <Widget>[
+    return [
       IconButton.filledTonal(
         tooltip: 'Agregar todos a la cola',
-        onPressed: favorites.isEmpty
-            ? null
-            : () => _addAllFavoritesToQueue(favorites),
+        onPressed: isEmpty ? null : onAddAll,
         icon: const Icon(Icons.queue_music_rounded),
       ),
       const SizedBox(width: 8),
       if (isCompact)
         IconButton.filled(
           tooltip: 'Reproducir todo',
-          onPressed: favorites.isEmpty
-              ? null
-              : () => _playAllFavorites(favorites),
+          onPressed: isEmpty ? null : onPlayAll,
           icon: const Icon(Icons.play_arrow_rounded),
         )
       else
         FilledButton.icon(
-          onPressed: favorites.isEmpty
-              ? null
-              : () => _playAllFavorites(favorites),
+          onPressed: isEmpty ? null : onPlayAll,
           icon: const Icon(Icons.play_arrow_rounded),
           label: Text(isDesktop ? 'Reproducir todo' : 'Reproducir'),
         ),
     ];
+  }
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          width: boxSize,
-          height: boxSize,
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.favorite_rounded,
-            color: AppTheme.accent,
-            size: boxSize * 0.52,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: titleBlock),
-        const SizedBox(width: 8),
-        ...actions,
-      ],
+  Widget _buildMostPlayedHeader(
+    BuildContext context,
+    List<Song> songs,
+    _LayoutSize layout,
+  ) {
+    return _buildSectionHeader(
+      context,
+      title: 'Más escuchadas',
+      subtitle: 'Las canciones que más suenan',
+      icon: Icons.trending_up_rounded,
+      layout: layout,
+      actions: _buildCollectionActions(
+        layout: layout,
+        isEmpty: songs.isEmpty,
+        onAddAll: () => _addAllMostPlayedToQueue(songs),
+        onPlayAll: () => _playAllMostPlayed(songs),
+      ),
+    );
+  }
+
+  Widget _buildFavoritesHeader(
+    BuildContext context,
+    List<Song> favorites,
+    _LayoutSize layout,
+  ) {
+    return _buildSectionHeader(
+      context,
+      title: 'Tus favoritos',
+      subtitle: 'Tu colección personal',
+      icon: Icons.favorite_rounded,
+      layout: layout,
+      actions: _buildCollectionActions(
+        layout: layout,
+        isEmpty: favorites.isEmpty,
+        onAddAll: () => _addAllFavoritesToQueue(favorites),
+        onPlayAll: () => _playAllFavorites(favorites),
+      ),
     );
   }
 
@@ -574,7 +597,9 @@ class _HomeScreenState extends State<HomeScreen> {
               rank: index + 1,
               width: cardWidth,
               playCount: _stats.getPlayCount(song),
-              onTap: () => _playMostPlayedSong(song),
+              // [MODIFICADO] Abre el mismo bottom sheet de acciones que un
+              // SongListTile normal en lugar de reproducir directamente.
+              onTap: () => SongListTile.showSongActions(context, song),
             );
           },
         ),
