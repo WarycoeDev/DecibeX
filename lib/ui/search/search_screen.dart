@@ -12,12 +12,11 @@ import '../library/song_list_tile.dart';
 
 enum _SearchFilter { all, songs, artists, albums, podcasts }
 
+enum _LayoutSize { compact, medium, expanded }
+
 /// Callback opcional para que la pantalla padre (p. ej. la shell de la app)
 /// navegue al detalle de un artista/álbum/podcast. Si no se proporciona,
 /// se muestra un SnackBar informativo.
-///
-/// Se permite `FutureOr<void>` para que la implementación pueda esperar
-/// (p. ej. a que LibraryScreen esté montado) sin romper el contrato.
 typedef SearchNavigationCallback =
     FutureOr<void> Function({
       required String title,
@@ -68,7 +67,6 @@ class _SearchScreenState extends State<SearchScreen>
   String _query = '';
 
   /// Caché de resultados por combinación (query normalizada, filtro).
-  /// Se invalida al cambiar la query o el filtro.
   final Map<String, List<Song>> _songsCache = {};
   final Map<String, List<Song>> _groupedCache = {};
 
@@ -99,6 +97,12 @@ class _SearchScreenState extends State<SearchScreen>
     _groupedCache.clear();
   }
 
+  _LayoutSize _layoutFor(double width) {
+    if (width < 400) return _LayoutSize.compact;
+    if (width < 800) return _LayoutSize.medium;
+    return _LayoutSize.expanded;
+  }
+
   bool _isUnknownAlbum(String album) {
     final normalized = album.trim().toLowerCase();
     return normalized.isEmpty ||
@@ -111,10 +115,9 @@ class _SearchScreenState extends State<SearchScreen>
       value.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 
   // ---------------------------------------------------------------
-  // Búsqueda difusa [NUEVO]
+  // Búsqueda difusa
   // ---------------------------------------------------------------
 
-  /// Normaliza texto: minúsculas, sin acentos, espacios colapsados.
   String _normalizeFuzzy(String value) {
     const accented = 'áàäâãéèëêíìïîóòöôõúùüûñç';
     const plain = 'aaaaaeeeeiiiiooooouuuunc';
@@ -126,8 +129,6 @@ class _SearchScreenState extends State<SearchScreen>
     return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
-  /// Comprueba si [needle] es una subsecuencia de [haystack] (en orden).
-  /// Devuelve la cantidad de "saltos" (caracteres ignorados) o -1 si no.
   int _subsequenceGaps(String needle, String haystack) {
     if (needle.isEmpty) return -1;
     int hi = 0;
@@ -153,7 +154,6 @@ class _SearchScreenState extends State<SearchScreen>
     return gaps;
   }
 
-  /// Distancia de Levenshtein (O(n·m) con memoria O(min(n,m))).
   int _levenshtein(String a, String b) {
     if (a == b) return 0;
     if (a.isEmpty) return b.length;
@@ -184,8 +184,6 @@ class _SearchScreenState extends State<SearchScreen>
     return prev[m];
   }
 
-  /// Puntúa una canción contra [query] (ya normalizada).
-  /// Devuelve 0 si no hay coincidencia aceptable.
   double _scoreSong(String query, Song song) {
     if (query.isEmpty) return 0;
 
@@ -193,7 +191,6 @@ class _SearchScreenState extends State<SearchScreen>
       '${song.title} ${song.artist} ${song.album}',
     );
 
-    // 1) Subcadena exacta.
     final idx = haystack.indexOf(query);
     if (idx >= 0) {
       final titleNorm = _normalizeFuzzy(song.title);
@@ -203,12 +200,10 @@ class _SearchScreenState extends State<SearchScreen>
       return 80;
     }
 
-    // Query muy corta: no aplicar difusa (demasiado ruido).
     if (query.length < 2) return 0;
 
     double best = 0;
 
-    // 2) Subsecuencia (todos los chars en orden).
     final gaps = _subsequenceGaps(query, haystack);
     if (gaps >= 0) {
       final penalty = (gaps / (haystack.length + 1)).clamp(0.0, 0.6);
@@ -216,7 +211,6 @@ class _SearchScreenState extends State<SearchScreen>
       if (subScore > best) best = subScore;
     }
 
-    // 3) Levenshtein sobre el campo más relevante (título primero).
     final candidates = <String>[
       _normalizeFuzzy(song.title),
       _normalizeFuzzy(song.artist),
@@ -238,7 +232,7 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   // ---------------------------------------------------------------
-  // Reproducción [CONECTADO]
+  // Reproducción
   // ---------------------------------------------------------------
 
   Future<void> _playSongs(List<Song> songs) async {
@@ -293,7 +287,7 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   // ---------------------------------------------------------------
-  // Resultados [CONECTADO a LibraryScanner + difusa]
+  // Resultados
   // ---------------------------------------------------------------
 
   Iterable<Song> _sourceForFilter(_SearchFilter filter) {
@@ -331,8 +325,6 @@ class _SearchScreenState extends State<SearchScreen>
     return result;
   }
 
-  /// Agrupa canciones de un tipo (artista/álbum/podcast) manteniendo
-  /// una canción representativa por grupo, ordenadas por relevancia difusa.
   List<Song> _groupedSongs({required bool isArtist, required bool isPodcast}) {
     if (_query.isEmpty) return const [];
     final q = _normalizeFuzzy(_query);
@@ -351,18 +343,15 @@ class _SearchScreenState extends State<SearchScreen>
       final normTitle = _normalizeFuzzy(title);
       double score = 0;
 
-      // Subcadena exacta.
       final idx = normTitle.indexOf(q);
       if (idx >= 0) {
         score = idx == 0 ? 100 : 80;
       } else if (q.length >= 2) {
-        // Subsecuencia.
         final gaps = _subsequenceGaps(q, normTitle);
         if (gaps >= 0) {
           final penalty = (gaps / (normTitle.length + 1)).clamp(0.0, 0.6);
           score = 60.0 * (1.0 - penalty);
         }
-        // Levenshtein.
         final dist = _levenshtein(q, normTitle);
         final maxLen = q.length > normTitle.length
             ? q.length
@@ -415,7 +404,6 @@ class _SearchScreenState extends State<SearchScreen>
     _entryController.forward(from: 0);
   }
 
-  /// [CONECTADO] Abre el detalle usando el callback del padre.
   void _openDetail({
     required String title,
     required String? artist,
@@ -452,49 +440,70 @@ class _SearchScreenState extends State<SearchScreen>
       builder: (context, _) {
         return LayoutBuilder(
           builder: (context, constraints) {
-            final isDesktop = constraints.maxWidth >= 800;
+            final layout = _layoutFor(constraints.maxWidth);
+            final isDesktop = layout == _LayoutSize.expanded;
+            final isCompact = layout == _LayoutSize.compact;
 
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1440),
-                child: CustomScrollView(
-                  controller: _scrollController,
-                  cacheExtent: 600,
-                  slivers: [
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 36 : 20,
-                        isDesktop ? 32 : 24,
-                        isDesktop ? 36 : 20,
-                        0,
+            final horizontal = switch (layout) {
+              _LayoutSize.compact => 16.0,
+              _LayoutSize.medium => 20.0,
+              _LayoutSize.expanded => 36.0,
+            };
+            final top = switch (layout) {
+              _LayoutSize.compact => 18.0,
+              _LayoutSize.medium => 24.0,
+              _LayoutSize.expanded => 32.0,
+            };
+
+            return SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1440),
+                  child: CustomScrollView(
+                    controller: _scrollController,
+                    cacheExtent: 600,
+                    slivers: [
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          top,
+                          horizontal,
+                          0,
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          child: _buildHeader(context, layout),
+                        ),
                       ),
-                      sliver: SliverToBoxAdapter(
-                        child: _buildHeader(context, isDesktop),
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          isCompact ? 16 : (isDesktop ? 28 : 20),
+                          horizontal,
+                          0,
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          child: _buildSearchField(layout),
+                        ),
                       ),
-                    ),
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 36 : 20,
-                        isDesktop ? 28 : 20,
-                        isDesktop ? 36 : 20,
-                        0,
+                      SliverPadding(
+                        padding: EdgeInsets.only(
+                          top: isCompact ? 14 : (isDesktop ? 24 : 18),
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          child: _buildFilters(layout),
+                        ),
                       ),
-                      sliver: SliverToBoxAdapter(child: _buildSearchField()),
-                    ),
-                    SliverPadding(
-                      padding: EdgeInsets.only(top: isDesktop ? 24 : 18),
-                      sliver: SliverToBoxAdapter(child: _buildFilters()),
-                    ),
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 36 : 20,
-                        isDesktop ? 32 : 24,
-                        isDesktop ? 36 : 20,
-                        36,
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          isCompact ? 18 : (isDesktop ? 32 : 24),
+                          horizontal,
+                          isCompact ? 24 : 36,
+                        ),
+                        sliver: _buildResults(isDesktop, layout),
                       ),
-                      sliver: _buildResults(isDesktop),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
@@ -504,32 +513,44 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool isDesktop) {
+  Widget _buildHeader(BuildContext context, _LayoutSize layout) {
     final theme = Theme.of(context);
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'ENCUENTRA TU MÚSICA',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
             color: AppTheme.accent,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.6,
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: isCompact ? 8 : 10),
         Text(
           'Buscar',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style:
               (isDesktop
                       ? theme.textTheme.headlineLarge
                       : theme.textTheme.headlineSmall)
-                  ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: -0.8),
+                  ?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.8,
+                    height: 1.15,
+                  ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: isCompact ? 6 : 8),
         Text(
           'Explora toda tu colección por canción, artista, álbum o podcast.',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: AppTheme.textSecondary,
           ),
@@ -538,9 +559,10 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildSearchField() {
+  Widget _buildSearchField(_LayoutSize layout) {
     final theme = Theme.of(context);
     final hasQuery = _query.isNotEmpty;
+    final isCompact = layout == _LayoutSize.compact;
 
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: _controller,
@@ -572,9 +594,9 @@ class _SearchScreenState extends State<SearchScreen>
                 : null,
             filled: true,
             fillColor: AppTheme.surface,
-            contentPadding: const EdgeInsets.symmetric(
+            contentPadding: EdgeInsets.symmetric(
               horizontal: 18,
-              vertical: 18,
+              vertical: isCompact ? 14 : 18,
             ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
@@ -600,10 +622,17 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildFilters() {
+  Widget _buildFilters(_LayoutSize layout) {
+    final horizontal = switch (layout) {
+      _LayoutSize.compact => 16.0,
+      _LayoutSize.medium => 20.0,
+      _LayoutSize.expanded => 36.0,
+    };
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.symmetric(horizontal: horizontal),
+      physics: const BouncingScrollPhysics(),
       child: Row(
         children: [
           for (int i = 0; i < _filters.length; i++) ...[
@@ -619,8 +648,13 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _entry(int index, Widget child) {
-    if (index >= _maxAnimatedItems) return child;
+  Widget _entry(
+    int index,
+    Widget child, [
+    _LayoutSize layout = _LayoutSize.medium,
+  ]) {
+    final maxItems = layout == _LayoutSize.compact ? 10 : _maxAnimatedItems;
+    if (index >= maxItems) return child;
     return _EntryTransition(
       animation: _entryController,
       index: index,
@@ -628,30 +662,32 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildResults(bool isDesktop) {
+  Widget _buildResults(bool isDesktop, _LayoutSize layout) {
     if (_query.isEmpty) {
       return SliverToBoxAdapter(
         child: _entry(
           0,
-          _EmptySearchState(
+          const _EmptySearchState(
             icon: Icons.search_rounded,
             title: 'Empieza a escribir',
             message:
                 'Busca por título, artista, álbum o podcast en toda tu biblioteca.',
           ),
+          layout,
         ),
       );
     }
 
     switch (_selectedFilter) {
       case _SearchFilter.all:
-        return _buildAllResults(isDesktop);
+        return _buildAllResults(isDesktop, layout);
 
       case _SearchFilter.songs:
         final songs = _matchingSongs();
         return _buildSongResults(
           songs,
           isDesktop,
+          layout,
           emptyTitle: 'Sin canciones',
           emptyMessage: 'Ninguna canción coincide con "$_query".',
         );
@@ -661,6 +697,7 @@ class _SearchScreenState extends State<SearchScreen>
         return _buildCollectionResults(
           artists,
           isDesktop,
+          layout,
           isArtist: true,
           emptyTitle: 'Sin artistas',
           emptyMessage: 'Ningún artista coincide con "$_query".',
@@ -671,6 +708,7 @@ class _SearchScreenState extends State<SearchScreen>
         return _buildCollectionResults(
           albums,
           isDesktop,
+          layout,
           isArtist: false,
           emptyTitle: 'Sin álbumes',
           emptyMessage: 'Ningún álbum coincide con "$_query".',
@@ -681,6 +719,7 @@ class _SearchScreenState extends State<SearchScreen>
         return _buildCollectionResults(
           podcasts,
           isDesktop,
+          layout,
           isArtist: false,
           isPodcast: true,
           emptyTitle: 'Sin podcasts',
@@ -689,7 +728,10 @@ class _SearchScreenState extends State<SearchScreen>
     }
   }
 
-  Widget _buildAllResults(bool isDesktop) {
+  Widget _buildAllResults(bool isDesktop, _LayoutSize layout) {
+    final isCompact = layout == _LayoutSize.compact;
+    final limit = isCompact ? 5 : 8;
+
     final songs = _matchingSongs();
     final artists = _groupedSongs(isArtist: true, isPodcast: false);
     final albums = _groupedSongs(isArtist: false, isPodcast: false);
@@ -707,6 +749,7 @@ class _SearchScreenState extends State<SearchScreen>
             title: 'Sin resultados',
             message: 'No encontramos nada que coincida con "$_query".',
           ),
+          layout,
         ),
       );
     }
@@ -715,15 +758,23 @@ class _SearchScreenState extends State<SearchScreen>
 
     if (songs.isNotEmpty) {
       slivers.add(_sectionHeader('Canciones', songs.length, 0));
-      slivers.add(_songListSliver(songs.take(8).toList(), isDesktop, start: 0));
+      slivers.add(
+        _songListSliver(
+          songs.take(limit).toList(),
+          isDesktop,
+          layout,
+          start: 0,
+        ),
+      );
     }
 
     if (artists.isNotEmpty) {
       slivers.add(_sectionHeader('Artistas', artists.length, 1));
       slivers.add(
         _collectionSliver(
-          artists.take(8).toList(),
+          artists.take(limit).toList(),
           isDesktop,
+          layout,
           isArtist: true,
           start: 1,
         ),
@@ -734,8 +785,9 @@ class _SearchScreenState extends State<SearchScreen>
       slivers.add(_sectionHeader('Álbumes', albums.length, 2));
       slivers.add(
         _collectionSliver(
-          albums.take(8).toList(),
+          albums.take(limit).toList(),
           isDesktop,
+          layout,
           isArtist: false,
           start: 2,
         ),
@@ -746,8 +798,9 @@ class _SearchScreenState extends State<SearchScreen>
       slivers.add(_sectionHeader('Podcasts', podcasts.length, 3));
       slivers.add(
         _collectionSliver(
-          podcasts.take(8).toList(),
+          podcasts.take(limit).toList(),
           isDesktop,
+          layout,
           isArtist: false,
           isPodcast: true,
           start: 3,
@@ -764,11 +817,15 @@ class _SearchScreenState extends State<SearchScreen>
         padding: EdgeInsets.only(top: slot == 0 ? 0 : 20, bottom: 10),
         child: Row(
           children: [
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
             const SizedBox(width: 8),
             Text(
@@ -785,7 +842,8 @@ class _SearchScreenState extends State<SearchScreen>
 
   Widget _buildSongResults(
     List<Song> songs,
-    bool isDesktop, {
+    bool isDesktop,
+    _LayoutSize layout, {
     required String emptyTitle,
     required String emptyMessage,
   }) {
@@ -798,15 +856,17 @@ class _SearchScreenState extends State<SearchScreen>
             title: emptyTitle,
             message: emptyMessage,
           ),
+          layout,
         ),
       );
     }
-    return _songListSliver(songs, isDesktop, start: 0);
+    return _songListSliver(songs, isDesktop, layout, start: 0);
   }
 
   Widget _songListSliver(
     List<Song> songs,
-    bool isDesktop, {
+    bool isDesktop,
+    _LayoutSize layout, {
     required int start,
   }) {
     return DecoratedSliver(
@@ -831,6 +891,7 @@ class _SearchScreenState extends State<SearchScreen>
                   },
                 ),
               ),
+              layout,
             );
           },
           childCount: songs.length,
@@ -842,7 +903,8 @@ class _SearchScreenState extends State<SearchScreen>
 
   Widget _buildCollectionResults(
     List<Song> songs,
-    bool isDesktop, {
+    bool isDesktop,
+    _LayoutSize layout, {
     required bool isArtist,
     bool isPodcast = false,
     required String emptyTitle,
@@ -861,12 +923,14 @@ class _SearchScreenState extends State<SearchScreen>
             title: emptyTitle,
             message: emptyMessage,
           ),
+          layout,
         ),
       );
     }
     return _collectionSliver(
       songs,
       isDesktop,
+      layout,
       isArtist: isArtist,
       isPodcast: isPodcast,
       start: 0,
@@ -875,11 +939,14 @@ class _SearchScreenState extends State<SearchScreen>
 
   Widget _collectionSliver(
     List<Song> songs,
-    bool isDesktop, {
+    bool isDesktop,
+    _LayoutSize layout, {
     required bool isArtist,
     bool isPodcast = false,
     required int start,
   }) {
+    final isCompact = layout == _LayoutSize.compact;
+
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
@@ -892,7 +959,7 @@ class _SearchScreenState extends State<SearchScreen>
             start + index,
             RepaintBoundary(
               child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
+                margin: EdgeInsets.only(bottom: isCompact ? 6 : 8),
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   border: Border.all(
@@ -906,9 +973,6 @@ class _SearchScreenState extends State<SearchScreen>
                   borderRadius: BorderRadius.circular(16),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
-                    // [CONECTADO] Abre el detalle real vía callback.
-                    // Para podcasts/artistas el álbum se pasa como null;
-                    // el nombre del grupo viaja en `title`.
                     onTap: () => _openDetail(
                       title: title,
                       artist: song.artist,
@@ -949,6 +1013,7 @@ class _SearchScreenState extends State<SearchScreen>
                 ),
               ),
             ),
+            layout,
           );
         },
         childCount: songs.length,
@@ -1093,10 +1158,14 @@ class _EmptySearchState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isCompact = MediaQuery.sizeOf(context).width < 400;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+      padding: EdgeInsets.symmetric(
+        horizontal: 24,
+        vertical: isCompact ? 32 : 48,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(18),

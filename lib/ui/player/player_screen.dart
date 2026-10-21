@@ -13,6 +13,8 @@ import '../../core/services/library_scanner.dart';
 
 enum _PlaybackMenuAction { toggleShuffle, repeatOff, repeatOne, repeatAll }
 
+enum _LayoutSize { compact, medium, expanded }
+
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
 
@@ -36,6 +38,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     PlaybackService.instance.removeListener(_onPlaybackChanged);
     super.dispose();
+  }
+
+  _LayoutSize _layoutFor(double width) {
+    if (width < 400) return _LayoutSize.compact;
+    if (width < 700) return _LayoutSize.medium;
+    return _LayoutSize.expanded;
   }
 
   void _onPlaybackChanged() {
@@ -129,8 +137,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       body: SafeArea(
         top: false,
         child: AnimatedBuilder(
-          // PlaybackQueue se escucha aquí para que la pantalla se reconstruya
-          // al añadir, quitar o reordenar canciones de la cola.
           animation: Listenable.merge([
             PlaybackService.instance,
             PlaybackQueue.instance,
@@ -142,66 +148,94 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
             if (song == null) return _buildEmptyPlayer(context);
 
-            if (MediaQuery.sizeOf(context).width >= 700) {
+            final layout = _layoutFor(MediaQuery.sizeOf(context).width);
+
+            if (layout == _LayoutSize.expanded) {
               return _buildDesktopLayout(context, song, playback);
             }
 
-            final screenWidth = MediaQuery.sizeOf(context).width;
-            final artworkSize = (screenWidth - 48).clamp(220.0, 360.0);
-            final position =
-                _dragPosition ?? _pendingSeekPosition ?? playback.position;
-
-            return Column(
-              children: [
-                SizedBox(height: _statusBarHeight(context)),
-                _buildHeader(context),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 520),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(height: 8),
-                            _buildArtwork(song.artworkPath, artworkSize),
-                            const SizedBox(height: 32),
-                            _buildSongInformation(song.title, song.artist),
-                            const SizedBox(height: 30),
-                            _buildProgress(position, playback.duration),
-                            const SizedBox(height: 20),
-                            _buildMainControls(
-                              isPlaying: playback.isPlaying,
-                              canPlayPrevious: playback.canPlayPrevious,
-                              canPlayNext: playback.canPlayNext,
-                              onPrevious: playback.playPrevious,
-                              onPlayPause: playback.togglePlayPause,
-                              onNext: playback.playNext,
-                            ),
-                            const SizedBox(height: 44),
-                            _buildBottomMenu(
-                              isFavorite: _isFavorite(song),
-                              onFavoritePressed: () => _toggleFavorite(song),
-                              shuffleEnabled: playback.shuffleEnabled,
-                              repeatMode: playback.repeatMode,
-                            ),
-                            const SizedBox(height: 24),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            );
+            return _buildMobileLayout(context, song, playback, layout);
           },
         ),
       ),
+    );
+  }
+
+  Widget _buildMobileLayout(
+    BuildContext context,
+    Song song,
+    PlaybackService playback,
+    _LayoutSize layout,
+  ) {
+    final screenSize = MediaQuery.sizeOf(context);
+    final isCompact = layout == _LayoutSize.compact;
+
+    final horizontalPadding = isCompact ? 18.0 : 24.0;
+
+    // En compact reducimos el máximo del artwork para que quepan controles,
+    // progreso y menú inferior sin scroll en la mayoría de Android pequeños.
+    final artworkMax = isCompact ? 300.0 : 360.0;
+    final artworkMin = isCompact ? 180.0 : 220.0;
+
+    final artworkSize = (screenSize.width - horizontalPadding * 2).clamp(
+      artworkMin,
+      artworkMax,
+    );
+
+    final position = _dragPosition ?? _pendingSeekPosition ?? playback.position;
+
+    return Column(
+      children: [
+        SizedBox(height: _statusBarHeight(context)),
+        _buildHeader(context),
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.symmetric(
+              horizontal: horizontalPadding,
+              vertical: isCompact ? 8 : 12,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(height: isCompact ? 4 : 8),
+                    _buildArtwork(song.artworkPath, artworkSize),
+                    SizedBox(height: isCompact ? 22 : 32),
+                    _buildSongInformation(
+                      song.title,
+                      song.artist,
+                      layout: layout,
+                    ),
+                    SizedBox(height: isCompact ? 20 : 30),
+                    _buildProgress(position, playback.duration),
+                    SizedBox(height: isCompact ? 14 : 20),
+                    _buildMainControls(
+                      isPlaying: playback.isPlaying,
+                      canPlayPrevious: playback.canPlayPrevious,
+                      canPlayNext: playback.canPlayNext,
+                      onPrevious: playback.playPrevious,
+                      onPlayPause: playback.togglePlayPause,
+                      onNext: playback.playNext,
+                      layout: layout,
+                    ),
+                    SizedBox(height: isCompact ? 24 : 44),
+                    _buildBottomMenu(
+                      isFavorite: _isFavorite(song),
+                      onFavoritePressed: () => _toggleFavorite(song),
+                      shuffleEnabled: playback.shuffleEnabled,
+                      repeatMode: playback.repeatMode,
+                    ),
+                    SizedBox(height: isCompact ? 12 : 24),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -246,6 +280,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 child: _buildSongInformation(
                                   song.title,
                                   song.artist,
+                                  layout: _LayoutSize.expanded,
                                 ),
                               ),
                               const SizedBox(height: 24),
@@ -323,6 +358,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               onPrevious: playback.playPrevious,
               onPlayPause: playback.togglePlayPause,
               onNext: playback.playNext,
+              layout: _LayoutSize.expanded,
             ),
           ),
           IconButton(
@@ -544,7 +580,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildSongInformation(String title, String artist) {
+  Widget _buildSongInformation(
+    String title,
+    String artist, {
+    required _LayoutSize layout,
+  }) {
+    final isCompact = layout == _LayoutSize.compact;
+    final titleSize = isCompact ? 20.0 : 23.0;
+    final artistSize = isCompact ? 14.0 : 16.0;
+
     return SizedBox(
       width: double.infinity,
       child: Column(
@@ -570,8 +614,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               width: double.infinity,
               child: _ScrollingTitle(
                 title: title,
-                style: const TextStyle(
-                  fontSize: 23,
+                style: TextStyle(
+                  fontSize: titleSize,
                   height: 1.2,
                   fontWeight: FontWeight.bold,
                 ),
@@ -603,7 +647,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: artistSize,
+                ),
               ),
             ),
           ),
@@ -711,7 +758,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required VoidCallback onPrevious,
     required VoidCallback onPlayPause,
     required VoidCallback onNext,
+    required _LayoutSize layout,
   }) {
+    final isCompact = layout == _LayoutSize.compact;
+    final sideIconSize = isCompact ? 32.0 : 36.0;
+    final sidePadding = isCompact ? 6.0 : 8.0;
+    final gap = isCompact ? 8.0 : 12.0;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
@@ -720,19 +773,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
           tooltip: 'Anterior',
           onPressed: canPlayPrevious ? onPrevious : null,
           icon: const Icon(Icons.skip_previous_rounded),
-          iconSize: 36,
-          padding: const EdgeInsets.all(8),
+          iconSize: sideIconSize,
+          padding: EdgeInsets.all(sidePadding),
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         ),
-        const SizedBox(width: 12),
-        _AnimatedPlayPauseButton(isPlaying: isPlaying, onPressed: onPlayPause),
-        const SizedBox(width: 12),
+        SizedBox(width: gap),
+        _AnimatedPlayPauseButton(
+          isPlaying: isPlaying,
+          onPressed: onPlayPause,
+          size: isCompact ? 68 : 76,
+        ),
+        SizedBox(width: gap),
         IconButton(
           tooltip: 'Siguiente',
           onPressed: canPlayNext ? onNext : null,
           icon: const Icon(Icons.skip_next_rounded),
-          iconSize: 36,
-          padding: const EdgeInsets.all(8),
+          iconSize: sideIconSize,
+          padding: EdgeInsets.all(sidePadding),
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         ),
       ],
@@ -978,6 +1035,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       (item) => _isCurrentQueueSong(initialSong, item),
     );
 
+    final screenSize = MediaQuery.sizeOf(context);
+    final isCompact = screenSize.width < 400;
+    final insetHorizontal = isCompact ? 12.0 : 20.0;
+
     showDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -998,8 +1059,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
                 return Dialog(
                   backgroundColor: AppTheme.surfaceVariant,
-                  insetPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
+                  insetPadding: EdgeInsets.symmetric(
+                    horizontal: insetHorizontal,
                     vertical: 24,
                   ),
                   shape: RoundedRectangleBorder(
@@ -1028,6 +1089,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     fontSize: 19,
                                     fontWeight: FontWeight.bold,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
@@ -1211,7 +1274,6 @@ class _QueueScrollHost extends StatefulWidget {
 
   const _QueueScrollHost({required this.initialIndex, required this.builder});
 
-  // Alto real de cada fila: 12 + 48 + 12.
   static const double itemHeight = 72;
   static const double listPadding = 0;
   static const double firstItemTopBorder = 0;
@@ -1451,10 +1513,12 @@ class _ScrollingTitleState extends State<_ScrollingTitle> {
 class _AnimatedPlayPauseButton extends StatefulWidget {
   final bool isPlaying;
   final VoidCallback onPressed;
+  final double size;
 
   const _AnimatedPlayPauseButton({
     required this.isPlaying,
     required this.onPressed,
+    this.size = 76,
   });
 
   @override
@@ -1507,13 +1571,15 @@ class _AnimatedPlayPauseButtonState extends State<_AnimatedPlayPauseButton>
 
   @override
   Widget build(BuildContext context) {
+    final size = widget.size;
+
     return ScaleTransition(
       scale: _scaleAnimation,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOutCubic,
-        width: 76,
-        height: 76,
+        width: size,
+        height: size,
         decoration: BoxDecoration(
           color: AppTheme.accent,
           shape: BoxShape.circle,
@@ -1544,7 +1610,7 @@ class _AnimatedPlayPauseButtonState extends State<_AnimatedPlayPauseButton>
               widget.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
               key: ValueKey<bool>(widget.isPlaying),
               color: Colors.white,
-              size: 43,
+              size: size * 0.57,
             ),
           ),
         ),
@@ -1552,9 +1618,6 @@ class _AnimatedPlayPauseButtonState extends State<_AnimatedPlayPauseButton>
     );
   }
 }
-
-/// Lista de cola compartida por el panel de PC y el diálogo de Android.
-/// Aquí vive todo el aspecto y comportamiento de las filas.
 
 class _QueueListView extends StatelessWidget {
   final List<Song> queue;
@@ -1763,8 +1826,6 @@ class _QueueListView extends StatelessWidget {
   }
 }
 
-/// Panel de PC: usa la misma lista que Android y añade el seguimiento
-/// automático de la canción actual.
 class _DesktopQueueList extends StatefulWidget {
   final List<Song> queue;
   final int currentIndex;
@@ -1789,7 +1850,6 @@ class _DesktopQueueList extends StatefulWidget {
 class _DesktopQueueListState extends State<_DesktopQueueList> {
   final ScrollController _controller = ScrollController();
 
-  // Alto real de cada fila: 12 + 48 + 12.
   static const double _itemExtent = 72;
 
   @override

@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../app_theme.dart';
 
+enum _LayoutSize { compact, medium, expanded }
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -58,6 +60,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  _LayoutSize _layoutFor(double width) {
+    if (width < 400) return _LayoutSize.compact;
+    if (width < 800) return _LayoutSize.medium;
+    return _LayoutSize.expanded;
   }
 
   Future<Directory> _getSettingsDirectory() async {
@@ -374,7 +382,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDesktop = MediaQuery.sizeOf(context).width >= 800;
 
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -382,72 +389,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final horizontalPadding = constraints.maxWidth >= 800 ? 36.0 : 20.0;
+        final layout = _layoutFor(constraints.maxWidth);
+        final isDesktop = layout == _LayoutSize.expanded;
+        final isCompact = layout == _LayoutSize.compact;
 
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            horizontalPadding,
-            isDesktop ? 32 : 24,
-            horizontalPadding,
-            36,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1100),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(theme, isDesktop),
-                  const SizedBox(height: 30),
-                  _buildSectionTitle(
-                    icon: Icons.palette_outlined,
-                    title: 'Apariencia',
-                    subtitle: 'Personaliza el aspecto de DecibeX.',
-                  ),
-                  const SizedBox(height: 14),
-                  _buildAppearanceCard(),
-                  const SizedBox(height: 30),
-                  _buildSectionTitle(
-                    icon: Icons.graphic_eq_rounded,
-                    title: 'Audio',
-                    subtitle: 'Preferencias de reproducción y sonido.',
-                  ),
-                  const SizedBox(height: 14),
-                  _buildAudioCard(),
-                  const SizedBox(height: 30),
-                  _buildSectionTitle(
-                    icon: Icons.folder_open_rounded,
-                    title: 'Biblioteca',
-                    subtitle: 'Configura las carpetas de música y podcasts.',
-                  ),
-                  const SizedBox(height: 14),
-                  _buildLibraryCard(),
-                  const SizedBox(height: 30),
-                  _buildSectionTitle(
-                    icon: Icons.info_outline_rounded,
-                    title: 'Acerca de DecibeX',
-                    subtitle: 'Información y estado de la configuración.',
-                  ),
-                  const SizedBox(height: 14),
-                  _buildAboutCard(),
-                  const SizedBox(height: 24),
-                  Center(
-                    child: TextButton.icon(
-                      onPressed: _resetSettings,
-                      icon: const Icon(Icons.restart_alt_rounded),
-                      label: const Text('Restablecer configuración'),
+        final horizontal = switch (layout) {
+          _LayoutSize.compact => 16.0,
+          _LayoutSize.medium => 20.0,
+          _LayoutSize.expanded => 36.0,
+        };
+        final top = switch (layout) {
+          _LayoutSize.compact => 18.0,
+          _LayoutSize.medium => 24.0,
+          _LayoutSize.expanded => 32.0,
+        };
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              horizontal,
+              top,
+              horizontal,
+              isCompact ? 24 : 36,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1100),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(theme, layout),
+                    SizedBox(height: isCompact ? 22 : 30),
+                    _buildSectionTitle(
+                      icon: Icons.palette_outlined,
+                      title: 'Apariencia',
+                      subtitle: 'Personaliza el aspecto de DecibeX.',
+                      layout: layout,
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Center(
-                    child: Text(
-                      'DecibeX · Configuración local',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: AppTheme.textSecondary,
+                    SizedBox(height: isCompact ? 10 : 14),
+                    _buildAppearanceCard(layout),
+                    SizedBox(height: isCompact ? 22 : 30),
+                    _buildSectionTitle(
+                      icon: Icons.graphic_eq_rounded,
+                      title: 'Audio',
+                      subtitle: 'Preferencias de reproducción y sonido.',
+                      layout: layout,
+                    ),
+                    SizedBox(height: isCompact ? 10 : 14),
+                    _buildAudioCard(),
+                    SizedBox(height: isCompact ? 22 : 30),
+                    _buildSectionTitle(
+                      icon: Icons.folder_open_rounded,
+                      title: 'Biblioteca',
+                      subtitle: 'Configura las carpetas de música y podcasts.',
+                      layout: layout,
+                    ),
+                    SizedBox(height: isCompact ? 10 : 14),
+                    _buildLibraryCard(layout),
+                    SizedBox(height: isCompact ? 22 : 30),
+                    _buildSectionTitle(
+                      icon: Icons.info_outline_rounded,
+                      title: 'Acerca de DecibeX',
+                      subtitle: 'Información y estado de la configuración.',
+                      layout: layout,
+                    ),
+                    SizedBox(height: isCompact ? 10 : 14),
+                    _buildAboutCard(),
+                    SizedBox(height: isCompact ? 18 : 24),
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: _resetSettings,
+                        icon: const Icon(Icons.restart_alt_rounded),
+                        label: const Text('Restablecer configuración'),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Center(
+                      child: Text(
+                        'DecibeX · Configuración local',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -456,30 +482,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildHeader(ThemeData theme, bool isDesktop) {
+  Widget _buildHeader(ThemeData theme, _LayoutSize layout) {
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'PERSONALIZACIÓN',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
             color: _accentColor,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.6,
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: isCompact ? 8 : 10),
         Text(
           'Configuración',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style:
               (isDesktop
                       ? theme.textTheme.headlineLarge
                       : theme.textTheme.headlineSmall)
-                  ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: -0.8),
+                  ?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.8,
+                    height: 1.15,
+                  ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: isCompact ? 6 : 8),
         Text(
           'Ajusta tu experiencia de escucha a tu manera.',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: AppTheme.textSecondary,
           ),
@@ -492,19 +531,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required IconData icon,
     required String title,
     required String subtitle,
+    required _LayoutSize layout,
   }) {
     final theme = Theme.of(context);
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
+
+    final boxSize = isDesktop ? 42.0 : (isCompact ? 36.0 : 40.0);
 
     return Row(
       children: [
         Container(
-          width: 42,
-          height: 42,
+          width: boxSize,
+          height: boxSize,
           decoration: BoxDecoration(
             color: _accentColor.withValues(alpha: 0.13),
             borderRadius: BorderRadius.circular(13),
           ),
-          child: Icon(icon, color: _accentColor, size: 22),
+          child: Icon(icon, color: _accentColor, size: boxSize * 0.52),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -513,6 +557,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Text(
                 title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -520,6 +566,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 3),
               Text(
                 subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -546,7 +594,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildAppearanceCard() {
+  Widget _buildAppearanceCard(_LayoutSize layout) {
+    final isCompact = layout == _LayoutSize.compact;
+    final swatchSize = isCompact ? 34.0 : 38.0;
+
     return _buildCard(
       children: [
         _SettingSwitchTile(
@@ -565,7 +616,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         _buildDivider(),
         Padding(
-          padding: const EdgeInsets.all(18),
+          padding: EdgeInsets.all(isCompact ? 14 : 18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -574,10 +625,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'Color de acento',
                 subtitle: 'Selecciona el color principal de la interfaz.',
               ),
-              const SizedBox(height: 18),
+              SizedBox(height: isCompact ? 14 : 18),
               Wrap(
-                spacing: 12,
-                runSpacing: 12,
+                spacing: isCompact ? 10 : 12,
+                runSpacing: isCompact ? 10 : 12,
                 children: [
                   for (final option in _accentOptions)
                     Tooltip(
@@ -591,8 +642,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         customBorder: const CircleBorder(),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 160),
-                          width: 38,
-                          height: 38,
+                          width: swatchSize,
+                          height: swatchSize,
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
@@ -610,9 +661,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: option.color,
                             ),
                             child: _accentColorValue == option.color.toARGB32()
-                                ? const Icon(
+                                ? Icon(
                                     Icons.check_rounded,
-                                    size: 18,
+                                    size: isCompact ? 16 : 18,
                                     color: Colors.white,
                                   )
                                 : null,
@@ -753,7 +804,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildLibraryCard() {
+  Widget _buildLibraryCard(_LayoutSize layout) {
     return _buildCard(
       children: [
         _SettingSwitchTile(
@@ -776,6 +827,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           icon: Icons.library_music_outlined,
           directories: _scanDirectories,
           podcasts: false,
+          layout: layout,
         ),
         _buildDivider(),
         _buildDirectorySection(
@@ -785,6 +837,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           icon: Icons.podcasts_rounded,
           directories: _podcastDirectories,
           podcasts: true,
+          layout: layout,
         ),
       ],
     );
@@ -796,12 +849,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required IconData icon,
     required List<String> directories,
     required bool podcasts,
+    required _LayoutSize layout,
   }) {
+    final isCompact = layout == _LayoutSize.compact;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 12, 14),
+          padding: EdgeInsets.fromLTRB(
+            isCompact ? 14 : 18,
+            isCompact ? 14 : 18,
+            isCompact ? 8 : 12,
+            isCompact ? 10 : 14,
+          ),
           child: Row(
             children: [
               Expanded(
@@ -811,7 +872,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: subtitle,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               IconButton.filledTonal(
                 onPressed: () => _addDirectory(podcasts: podcasts),
                 tooltip: podcasts
@@ -827,8 +888,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           for (int i = 0; i < directories.length; i++) ...[
             if (i > 0) _buildDivider(),
             ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 18,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: isCompact ? 14 : 18,
                 vertical: 4,
               ),
               leading: Icon(Icons.folder_rounded, color: _accentColor),
@@ -847,13 +908,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ] else
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            padding: EdgeInsets.fromLTRB(
+              isCompact ? 16 : 24,
+              8,
+              isCompact ? 16 : 24,
+              isCompact ? 16 : 24,
+            ),
             child: Center(
               child: Column(
                 children: [
                   Icon(
                     Icons.folder_off_outlined,
-                    size: 30,
+                    size: isCompact ? 26 : 30,
                     color: AppTheme.textSecondary,
                   ),
                   const SizedBox(height: 10),
@@ -864,6 +930,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 5),
                   Text(

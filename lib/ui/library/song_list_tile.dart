@@ -9,6 +9,7 @@ import '../../core/models/playlist.dart';
 import '../../core/services/playback_queue.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/playlist_service.dart';
+import '../../features/library/playlist_name_dialog.dart';
 
 class SongListTile extends StatelessWidget {
   final Song song;
@@ -49,6 +50,14 @@ class SongListTile extends StatelessWidget {
 
     final alreadyQueued = queue.contains(song);
 
+    // [NUEVO] Aseguramos que las playlists estén cargadas antes de decidir
+    // si mostramos "Añadir a playlist" o "Crear playlist".
+    final playlistService = PlaylistService.instance;
+    try {
+      await playlistService.initialize();
+    } catch (_) {}
+    final hasPlaylists = playlistService.playlists.isNotEmpty;
+
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppTheme.surfaceVariant,
@@ -86,10 +95,16 @@ class SongListTile extends StatelessWidget {
                   ),
                   onTap: () => Navigator.pop(context, 'toggle'),
                 ),
+                // [MODIFICADO] Etiqueta y acción condicionales.
                 ListTile(
                   leading: const Icon(Icons.library_music_rounded),
-                  title: const Text('Añadir a playlist'),
-                  onTap: () => Navigator.pop(context, 'playlist'),
+                  title: Text(
+                    hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
+                  ),
+                  onTap: () => Navigator.pop(
+                    context,
+                    hasPlaylists ? 'playlist' : 'create_playlist',
+                  ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
@@ -107,12 +122,48 @@ class SongListTile extends StatelessWidget {
       return;
     }
 
+    if (action == 'create_playlist') {
+      await _createPlaylistThenAddSong(context);
+      return;
+    }
+
     if (action == 'playlist') {
       await _showAddToPlaylistDialog(context);
       return;
     }
 
     await _handleQueueAction(action);
+  }
+
+  /// [NUEVO] Crea una playlist con el diálogo compartido y, al terminar,
+  /// abre el selector de playlists para añadir la canción.
+  Future<void> _createPlaylistThenAddSong(BuildContext context) async {
+    final service = PlaylistService.instance;
+
+    // 1) Diálogo de creación (reutiliza el de LibraryScreen).
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const PlaylistNameDialog(
+        icon: Icons.queue_music_rounded,
+        title: 'Nueva playlist',
+        subtitle: 'Ponle un nombre para empezar a organizar tu música.',
+        confirmLabel: 'Crear',
+      ),
+    );
+
+    if (name == null || !context.mounted) return;
+
+    // 2) Crear la playlist.
+    try {
+      await service.create(name);
+    } catch (_) {
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    // 3) Abrir el diálogo de selección de playlists para añadir la canción.
+    await _showAddToPlaylistDialog(context);
   }
 
   Future<void> _handleQueueAction(String action) async {
@@ -446,6 +497,15 @@ class SongListTile extends StatelessWidget {
     final alreadyQueued = queue.contains(song);
     final queueIsEmpty = queue.isEmpty;
 
+    // [NUEVO] Mismo chequeo que en _onSongTap para el long-press.
+    final playlistService = PlaylistService.instance;
+    try {
+      await playlistService.initialize();
+    } catch (_) {}
+    final hasPlaylists = playlistService.playlists.isNotEmpty;
+
+    if (!context.mounted) return;
+
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppTheme.surfaceVariant,
@@ -506,10 +566,16 @@ class SongListTile extends StatelessWidget {
                   ),
                   onTap: () => Navigator.pop(sheetContext, 'toggle'),
                 ),
+                // [MODIFICADO] Etiqueta y acción condicionales.
                 ListTile(
                   leading: const Icon(Icons.library_music_rounded),
-                  title: const Text('Añadir a playlist'),
-                  onTap: () => Navigator.pop(sheetContext, 'playlist'),
+                  title: Text(
+                    hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
+                  ),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    hasPlaylists ? 'playlist' : 'create_playlist',
+                  ),
                 ),
                 if (onFavoriteChanged != null)
                   ListTile(
@@ -544,6 +610,11 @@ class SongListTile extends StatelessWidget {
 
     if (action == 'favorite') {
       onFavoriteChanged?.call(!song.favorite);
+      return;
+    }
+
+    if (action == 'create_playlist') {
+      await _createPlaylistThenAddSong(context);
       return;
     }
 

@@ -20,7 +20,11 @@ import '../../core/models/playlist.dart';
 import '../../core/services/playlist_service.dart';
 import '../../core/services/podcast_statistics_service.dart'; // [PODCAST]
 
+import '../../features/library/playlist_name_dialog.dart';
+
 enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
+
+enum _LayoutSize { compact, medium, expanded }
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -117,6 +121,12 @@ class LibraryScreenState extends State<LibraryScreen>
         normalized == 'unknown album';
   }
 
+  _LayoutSize _layoutFor(double width) {
+    if (width < 400) return _LayoutSize.compact;
+    if (width < 800) return _LayoutSize.medium;
+    return _LayoutSize.expanded;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -151,11 +161,6 @@ class LibraryScreenState extends State<LibraryScreen>
 
   /// [CONECTADO] Abre directamente el detalle de un artista/álbum/podcast
   /// desde fuera de la biblioteca (p. ej. desde Buscar).
-  ///
-  /// - Podcast: `title` es el nombre del podcast (se guarda en
-  ///   `_openedPodcast`).
-  /// - Álbum:   `title` es el nombre del álbum y `artist` su artista.
-  /// - Artista: `title` es el nombre del artista.
   void openDetailFromExternal({
     required String title,
     required String? artist,
@@ -322,17 +327,12 @@ class LibraryScreenState extends State<LibraryScreen>
     await playback.playQueue();
   }
 
-  /// Devuelve el episodio en el que debe reanudarse:
-  /// 1) El más reciente empezado y no terminado.
-  /// 2) Si no hay, el siguiente al último episodio terminado en el orden
-  ///    de [episodes].
-  /// 3) Si no aplica ninguno, `null`.
+  /// Devuelve el episodio en el que debe reanudarse.
   Song? _resumeEpisode(List<Song> episodes) {
     if (episodes.isEmpty) return null;
 
     final stats = PodcastStatisticsService.instance;
 
-    // 1) Episodio empezado y no terminado, el más reciente por fecha.
     Song? best;
     DateTime? bestAt;
 
@@ -353,13 +353,11 @@ class LibraryScreenState extends State<LibraryScreen>
 
     if (best != null) return best;
 
-    // 2) Sin empezados: buscar el último índice terminado en el orden de
-    //    la lista y devolver el siguiente.
     int lastCompletedIndex = -1;
 
     for (int i = 0; i < episodes.length; i++) {
       if (stats.statsFor(episodes[i])?.completed == true) {
-        lastCompletedIndex = i; // se queda con el mayor índice terminado
+        lastCompletedIndex = i;
       }
     }
 
@@ -371,16 +369,12 @@ class LibraryScreenState extends State<LibraryScreen>
     return episodes[nextIndex];
   }
 
-  // [PODCAST] Reproduce el episodio elegido (PlaybackService reanuda solo).
-  // [PODCAST] Añade TODOS los episodios del podcast abierto a la cola y
-  // arranca directamente en el episodio elegido, en el minuto guardado.
   Future<void> _resumePodcastEpisode(Song episode, List<Song> episodes) async {
     final queue = PlaybackQueue.instance;
     final playback = PlaybackService.instance;
 
     if (episodes.isEmpty) return;
 
-    // Si ya hay algo en cola, pedir confirmación antes de sobrescribir.
     if (!queue.isEmpty) {
       final confirmed = await _confirmOverwriteQueue();
       if (!mounted || !confirmed) return;
@@ -391,13 +385,10 @@ class LibraryScreenState extends State<LibraryScreen>
       queue.add(ep);
     }
 
-    // Cargar la cola (esto empieza por el primero), pero inmediatamente
-    // saltamos al episodio con progreso pendiente.
     await playback.playQueue();
 
     if (!mounted) return;
 
-    // Si el episodio elegido no es el primero, saltar a él.
     final current = playback.currentSong;
     final sameCurrent =
         current != null &&
@@ -407,8 +398,6 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!sameCurrent) {
       await playback.playSongFromQueue(episode);
     }
-    // PlaybackService._loadAndPlaySong reanuda desde lastPosition
-    // automáticamente para podcasts, así que no hace falta llamar a seek().
   }
 
   Future<Directory> _getSettingsDirectory() async {
@@ -644,8 +633,14 @@ class LibraryScreenState extends State<LibraryScreen>
     }, scrollTo: _savedScrollOffset);
   }
 
-  Widget _entry(int index, Widget child) {
-    if (index >= _maxAnimatedItems) return child;
+  Widget _entry(
+    int index,
+    Widget child, [
+    _LayoutSize layout = _LayoutSize.medium,
+  ]) {
+    final maxItems = layout == _LayoutSize.compact ? 10 : _maxAnimatedItems;
+
+    if (index >= maxItems) return child;
 
     return _EntryTransition(
       animation: _entryController,
@@ -827,88 +822,99 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      // [PODCAST] Escuchar cambios de estadísticas para refrescar progreso/badge.
       animation: Listenable.merge([
         _scanner,
         _playlistService,
         PodcastStatisticsService.instance,
       ]),
-
       builder: (context, child) {
         final songs = _getVisibleSongs();
 
         return LayoutBuilder(
           builder: (context, constraints) {
-            final isDesktop = constraints.maxWidth >= 800;
+            final layout = _layoutFor(constraints.maxWidth);
+            final isDesktop = layout == _LayoutSize.expanded;
+            final isCompact = layout == _LayoutSize.compact;
 
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1440),
+            final horizontal = switch (layout) {
+              _LayoutSize.compact => 16.0,
+              _LayoutSize.medium => 20.0,
+              _LayoutSize.expanded => 36.0,
+            };
+            final top = switch (layout) {
+              _LayoutSize.compact => 18.0,
+              _LayoutSize.medium => 24.0,
+              _LayoutSize.expanded => 32.0,
+            };
 
-                child: CustomScrollView(
-                  controller: _scrollController,
-
-                  cacheExtent: 600,
-
-                  slivers: [
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 36 : 20,
-                        isDesktop ? 32 : 24,
-                        isDesktop ? 36 : 20,
-                        0,
-                      ),
-
-                      sliver: SliverToBoxAdapter(
-                        child: _buildHeader(context, isDesktop),
-                      ),
-                    ),
-
-                    SliverPadding(
-                      padding: EdgeInsets.only(top: isDesktop ? 32 : 24),
-
-                      sliver: SliverToBoxAdapter(child: _buildTabs()),
-                    ),
-
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 36 : 20,
-                        isDesktop ? 36 : 28,
-                        isDesktop ? 36 : 20,
-                        0,
-                      ),
-
-                      sliver: SliverToBoxAdapter(
-                        child: _entry(0, _buildSectionHeader(context, songs)),
-                      ),
-                    ),
-
-                    if (_scanner.isScanning)
-                      const SliverPadding(
-                        padding: EdgeInsets.symmetric(horizontal: 20),
+            return SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1440),
+                  child: CustomScrollView(
+                    controller: _scrollController,
+                    cacheExtent: 600,
+                    slivers: [
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          top,
+                          horizontal,
+                          0,
+                        ),
                         sliver: SliverToBoxAdapter(
-                          child: LinearProgressIndicator(),
+                          child: _buildHeader(context, layout),
                         ),
                       ),
-
-                    if (_scanner.error != null)
                       SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-
-                        sliver: SliverToBoxAdapter(child: _buildError()),
+                        padding: EdgeInsets.only(
+                          top: isCompact ? 20 : (isDesktop ? 32 : 24),
+                        ),
+                        sliver: SliverToBoxAdapter(child: _buildTabs(layout)),
                       ),
-
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(
-                        isDesktop ? 36 : 20,
-                        16,
-                        isDesktop ? 36 : 20,
-                        36,
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          isCompact ? 24 : (isDesktop ? 36 : 28),
+                          horizontal,
+                          0,
+                        ),
+                        sliver: SliverToBoxAdapter(
+                          child: _entry(
+                            0,
+                            _buildSectionHeader(context, songs, layout),
+                            layout,
+                          ),
+                        ),
                       ),
-
-                      sliver: _buildContent(songs, isDesktop),
-                    ),
-                  ],
+                      if (_scanner.isScanning)
+                        SliverPadding(
+                          padding: EdgeInsets.symmetric(horizontal: horizontal),
+                          sliver: const SliverToBoxAdapter(
+                            child: LinearProgressIndicator(),
+                          ),
+                        ),
+                      if (_scanner.error != null)
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            horizontal,
+                            12,
+                            horizontal,
+                            0,
+                          ),
+                          sliver: SliverToBoxAdapter(child: _buildError()),
+                        ),
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontal,
+                          isCompact ? 12 : 16,
+                          horizontal,
+                          isCompact ? 24 : 36,
+                        ),
+                        sliver: _buildContent(songs, isDesktop, layout),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -918,69 +924,72 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool isDesktop) {
+  Widget _buildHeader(BuildContext context, _LayoutSize layout) {
     final theme = Theme.of(context);
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-
       children: [
         Text(
           'TU COLECCIÓN',
-
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
             color: AppTheme.accent,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.6,
           ),
         ),
-
-        const SizedBox(height: 10),
-
+        SizedBox(height: isCompact ? 8 : 10),
         Text(
           'Tu biblioteca',
-
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style:
               (isDesktop
                       ? theme.textTheme.headlineLarge
                       : theme.textTheme.headlineSmall)
-                  ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: -0.8),
+                  ?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.8,
+                    height: 1.15,
+                  ),
         ),
-
-        const SizedBox(height: 8),
-
+        SizedBox(height: isCompact ? 6 : 8),
         Text(
           'Toda tu música y tus podcasts, organizados en un solo lugar.',
-
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: AppTheme.textSecondary,
           ),
         ),
-
-        const SizedBox(height: 12),
-
+        SizedBox(height: isCompact ? 10 : 12),
         Wrap(
-          spacing: 10,
+          spacing: isCompact ? 8 : 10,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
-
           children: [
             Text(
               _scanner.lastScan == null
                   ? 'Escaneo pendiente'
                   : 'Último escaneo: ${_formatLastScan(_scanner.lastScan!)}',
-
               style: theme.textTheme.bodySmall?.copyWith(
                 color: AppTheme.textSecondary,
               ),
             ),
-
             OutlinedButton.icon(
               onPressed: _scanner.isScanning ? null : _scanner.scan,
-
               icon: const Icon(Icons.refresh_rounded, size: 18),
-
               label: const Text('Escanear ahora'),
+              style: OutlinedButton.styleFrom(
+                visualDensity: isCompact ? VisualDensity.compact : null,
+                padding: isCompact
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+                    : null,
+              ),
             ),
           ],
         ),
@@ -1003,22 +1012,24 @@ class LibraryScreenState extends State<LibraryScreen>
     return '$datePart $timePart';
   }
 
-  Widget _buildTabs() {
+  Widget _buildTabs(_LayoutSize layout) {
+    final horizontal = switch (layout) {
+      _LayoutSize.compact => 16.0,
+      _LayoutSize.medium => 20.0,
+      _LayoutSize.expanded => 36.0,
+    };
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-
+      padding: EdgeInsets.symmetric(horizontal: horizontal),
+      physics: const BouncingScrollPhysics(),
       child: Row(
         children: [
           for (int i = 0; i < _tabs.length; i++) ...[
             if (i > 0) const SizedBox(width: 8),
-
             _LibraryTabButton(
               data: _tabs[i],
-
               selected: _selectedTab == _tabs[i].tab,
-
               onTap: () => _selectTab(_tabs[i].tab),
             ),
           ],
@@ -1027,8 +1038,13 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, List<Song> songs) {
+  Widget _buildSectionHeader(
+    BuildContext context,
+    List<Song> songs,
+    _LayoutSize layout,
+  ) {
     final theme = Theme.of(context);
+    final isCompact = layout == _LayoutSize.compact;
 
     final showPlaybackButtons =
         songs.isNotEmpty &&
@@ -1047,7 +1063,103 @@ class LibraryScreenState extends State<LibraryScreen>
       padding: WidgetStatePropertyAll(EdgeInsets.zero),
     );
 
+    final actions = <Widget>[
+      if (showReorder)
+        IconButton(
+          style: buttonStyle,
+          tooltip: _reorderingFavorites
+              ? 'Terminar de ordenar'
+              : 'Reordenar favoritos',
+          onPressed: () {
+            setState(() => _reorderingFavorites = !_reorderingFavorites);
+          },
+          icon: Icon(
+            _reorderingFavorites ? Icons.check_rounded : Icons.reorder_rounded,
+          ),
+        ),
+      if (_selectedTab == _LibraryTab.playlists && _openedPlaylistId != null)
+        IconButton(
+          style: buttonStyle,
+          tooltip: 'Terminar de ordenar',
+          onPressed: () =>
+              setState(() => _reorderingPlaylist = !_reorderingPlaylist),
+          icon: Icon(
+            _reorderingPlaylist ? Icons.check_rounded : Icons.reorder_rounded,
+          ),
+        ),
+      if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null)
+        Builder(
+          builder: (context) {
+            final episode = _resumeEpisode(songs);
+            if (episode == null) return const SizedBox.shrink();
+
+            if (isCompact) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: IconButton.filled(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.accent,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(44, 44),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  tooltip: 'Reanudar',
+                  onPressed: () => _resumePodcastEpisode(episode, songs),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                ),
+              );
+            }
+
+            return Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  minimumSize: const Size(0, 44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => _resumePodcastEpisode(episode, songs),
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: const Text('Reanudar'),
+              ),
+            );
+          },
+        ),
+      if (showPlaybackButtons) ...[
+        IconButton.filledTonal(
+          style: buttonStyle,
+          tooltip: 'Agregar a la cola',
+          onPressed: () => _addSongsToQueue(songs),
+          icon: const Icon(Icons.queue_music_rounded),
+        ),
+        IconButton.filled(
+          style: buttonStyle,
+          tooltip: 'Reproducir todo',
+          onPressed: () => _playSongs(songs),
+          icon: const Icon(Icons.play_arrow_rounded),
+        ),
+      ],
+      if (_selectedTab == _LibraryTab.playlists && _openedPlaylistId == null)
+        IconButton(
+          style: buttonStyle,
+          tooltip: 'Añadir playlist',
+          onPressed: _showPlaylistAddMenu,
+          icon: const Icon(Icons.add_rounded),
+        ),
+      if (_isCollectionTab) _buildViewModeButtons(layout),
+    ];
+
+    // Fila del título: [atrás] + [título / subtítulo] + [acciones].
+    // El título y los controles SIEMPRE comparten la misma línea; solo el
+    // subtítulo queda debajo del título dentro de su columna.
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         if (_isDetailView) ...[
           Material(
@@ -1072,8 +1184,7 @@ class LibraryScreenState extends State<LibraryScreen>
           ),
           const SizedBox(width: 12),
         ],
-
-        // Título con efecto carrusel + subtítulo
+        // Título + subtítulo (el subtítulo queda debajo del título).
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1097,134 +1208,41 @@ class LibraryScreenState extends State<LibraryScreen>
             ],
           ),
         ),
-
-        // Reordenar favoritos
-        if (showReorder) ...[
-          const SizedBox(width: 8),
-          IconButton(
-            style: buttonStyle,
-            tooltip: _reorderingFavorites
-                ? 'Terminar de ordenar'
-                : 'Reordenar favoritos',
-            onPressed: () {
-              setState(() => _reorderingFavorites = !_reorderingFavorites);
-            },
-            icon: Icon(
-              _reorderingFavorites
-                  ? Icons.check_rounded
-                  : Icons.reorder_rounded,
-            ),
-          ),
-        ],
-
-        // Reordenar playlist
-        if (_selectedTab == _LibraryTab.playlists &&
-            _openedPlaylistId != null) ...[
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Terminar de ordenar',
-            onPressed: () =>
-                setState(() => _reorderingPlaylist = !_reorderingPlaylist),
-            icon: Icon(
-              _reorderingPlaylist ? Icons.check_rounded : Icons.reorder_rounded,
-            ),
-          ),
-        ],
-
-        // [PODCAST] Botón Reanudar en detalle de podcast.
-        // Añade todos los episodios a la cola y salta al episodio pendiente
-        // en el minuto guardado.
-        if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null)
-          Builder(
-            builder: (context) {
-              final episode = _resumeEpisode(songs);
-              if (episode == null) return const SizedBox.shrink();
-
-              return Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.accent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    minimumSize: const Size(0, 44),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () => _resumePodcastEpisode(episode, songs),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                  label: const Text('Reanudar'),
-                ),
-              );
-            },
-          ),
-
-        // Botones de reproducción
-        if (showPlaybackButtons) ...[
-          const SizedBox(width: 8),
-          IconButton.filledTonal(
-            style: buttonStyle,
-            tooltip: 'Agregar a la cola',
-            onPressed: () => _addSongsToQueue(songs),
-            icon: const Icon(Icons.queue_music_rounded),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-            style: buttonStyle,
-            tooltip: 'Reproducir todo',
-            onPressed: () => _playSongs(songs),
-            icon: const Icon(Icons.play_arrow_rounded),
-          ),
-        ],
-
-        if (_selectedTab == _LibraryTab.playlists &&
-            _openedPlaylistId == null) ...[
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Añadir playlist',
-            onPressed: _showPlaylistAddMenu,
-            icon: const Icon(Icons.add_rounded),
-          ),
-        ],
-
-        if (_isCollectionTab) ...[
-          const SizedBox(width: 12),
-          _buildViewModeButtons(),
-        ],
+        // Controles a la derecha, en la MISMA línea que el título.
+        if (actions.isNotEmpty) ...[const SizedBox(width: 8), ...actions],
       ],
     );
   }
 
-  Widget _buildViewModeButtons() {
+  Widget _buildViewModeButtons([_LayoutSize layout = _LayoutSize.medium]) {
     final isGrid = _isGridMode;
+    final isCompact = layout == _LayoutSize.compact;
+    final size = isCompact ? 34.0 : 38.0;
 
     return Container(
       padding: const EdgeInsets.all(3),
-
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
       ),
-
       child: Row(
         mainAxisSize: MainAxisSize.min,
-
         children: [
           _ViewModeButton(
             icon: Icons.view_list_rounded,
             selected: !isGrid,
             tooltip: 'Vista de lista',
+            size: size,
             onTap: () {
               if (isGrid) _toggleGridMode();
             },
           ),
-
           _ViewModeButton(
             icon: Icons.grid_view_rounded,
             selected: isGrid,
             tooltip: 'Vista de cuadrícula',
+            size: size,
             onTap: () {
               if (!isGrid) _toggleGridMode();
             },
@@ -1295,7 +1313,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<void> _createPlaylist() async {
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => const _PlaylistNameDialog(
+      builder: (_) => const PlaylistNameDialog(
         icon: Icons.queue_music_rounded,
         title: 'Nueva playlist',
         subtitle: 'Ponle un nombre para empezar a organizar tu música.',
@@ -1357,7 +1375,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<void> _renamePlaylist(Playlist playlist) async {
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => _PlaylistNameDialog(
+      builder: (_) => PlaylistNameDialog(
         icon: Icons.edit_rounded,
         title: 'Renombrar playlist',
         subtitle: 'Elige un nuevo nombre para "${playlist.name}".',
@@ -1404,27 +1422,214 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _deletePlaylist(Playlist playlist) async {
-    final confirmed = await showDialog<bool>(
+    final songs = _playlistService.resolveSongs(playlist);
+
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Eliminar playlist'),
-        content: Text(
-          '¿Quieres eliminar "${playlist.name}"? Esta acción no elimina los archivos de música.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+
+        return SafeArea(
+          top: false,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Handle superior
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Carátula con badge de advertencia
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: AppTheme.surfaceVariant,
+                            width: 0.7,
+                          ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: _playlistArtwork(songs),
+                      ),
+                      Positioned(
+                        right: -6,
+                        bottom: -6,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFB3261E),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppTheme.surface,
+                              width: 3,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.delete_outline_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Título
+                  Text(
+                    'Eliminar playlist',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Nombre de la playlist
+                  Text(
+                    '“${playlist.name}”',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: AppTheme.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Metadata
+                  Text(
+                    '${playlist.songCount} ${playlist.songCount == 1 ? "canción" : "canciones"}',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Mensaje de advertencia
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: AppTheme.surfaceVariant,
+                        width: 0.7,
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Los archivos de música no se eliminarán, '
+                            'solo la playlist. Esta acción no se puede deshacer.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.textSecondary,
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Botones
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(sheetContext, false),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            side: BorderSide(
+                              color: AppTheme.surfaceVariant,
+                              width: 0.9,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text('Cancelar'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => Navigator.pop(sheetContext, true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFB3261E),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                          ),
+                          label: const Text('Eliminar'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
+        );
+      },
     );
+
     if (confirmed != true) return;
+
     await _playlistService.delete(playlist);
+
     if (!mounted) return;
     if (_openedPlaylistId == playlist.id) _goBack();
   }
@@ -1444,46 +1649,61 @@ class LibraryScreenState extends State<LibraryScreen>
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Añadir canciones a ${playlist.name}'),
-          content: SizedBox(
-            width: 520,
-            height: 420,
-            child: librarySongs.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No hay canciones disponibles en la biblioteca.',
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: librarySongs.length,
-                    itemBuilder: (context, index) {
-                      final song = librarySongs[index];
-                      final path = song.filePath!;
-                      final alreadyAdded = playlist.songPaths.contains(path);
-                      return CheckboxListTile(
-                        value: selected.contains(path) || alreadyAdded,
-                        onChanged: alreadyAdded
-                            ? null
-                            : (value) => setDialogState(() {
-                                if (value == true) {
-                                  selected.add(path);
-                                } else {
-                                  selected.remove(path);
-                                }
-                              }),
-                        title: Text(
-                          song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+          content: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 420;
+              final height = isCompact
+                  ? (MediaQuery.sizeOf(context).height * 0.55).clamp(
+                      260.0,
+                      420.0,
+                    )
+                  : 420.0;
+              final width = isCompact ? double.infinity : 520.0;
+
+              return SizedBox(
+                width: width,
+                height: height,
+                child: librarySongs.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No hay canciones disponibles en la biblioteca.',
                         ),
-                        subtitle: Text(
-                          song.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        controlAffinity: ListTileControlAffinity.leading,
-                      );
-                    },
-                  ),
+                      )
+                    : ListView.builder(
+                        itemCount: librarySongs.length,
+                        itemBuilder: (context, index) {
+                          final song = librarySongs[index];
+                          final path = song.filePath!;
+                          final alreadyAdded = playlist.songPaths.contains(
+                            path,
+                          );
+                          return CheckboxListTile(
+                            value: selected.contains(path) || alreadyAdded,
+                            onChanged: alreadyAdded
+                                ? null
+                                : (value) => setDialogState(() {
+                                    if (value == true) {
+                                      selected.add(path);
+                                    } else {
+                                      selected.remove(path);
+                                    }
+                                  }),
+                            title: Text(
+                              song.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            controlAffinity: ListTileControlAffinity.leading,
+                          );
+                        },
+                      ),
+              );
+            },
           ),
           actions: [
             TextButton(
@@ -1523,8 +1743,6 @@ class LibraryScreenState extends State<LibraryScreen>
     }, scrollTo: 0);
   }
 
-  /// Calcula el childAspectRatio para que la celda mida exactamente:
-  /// padding vertical + carátula cuadrada (= ancho interno) + gap + texto.
   double _gridAspectRatio({
     required double crossAxisExtent,
     required int columns,
@@ -1540,13 +1758,17 @@ class LibraryScreenState extends State<LibraryScreen>
 
     final double artworkSize = cellWidth - horizontalPadding;
 
-    final double cellHeight = verticalPadding + artworkSize + gap + textHeight;
+    final double scaledText =
+        MediaQuery.textScalerOf(context).scale(1.0) * textHeight;
+
+    final double cellHeight = verticalPadding + artworkSize + gap + scaledText;
 
     return cellWidth / cellHeight;
   }
 
-  Widget _buildPlaylistsCollection(bool isDesktop) {
+  Widget _buildPlaylistsCollection(bool isDesktop, _LayoutSize layout) {
     final playlists = _playlistService.playlists;
+    final isCompact = layout == _LayoutSize.compact;
 
     if (_playlistsGridMode) {
       return SliverLayoutBuilder(
@@ -1648,6 +1870,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       ),
                     ),
                   ),
+                  layout,
                 );
               },
               childCount: playlists.length,
@@ -1668,7 +1891,7 @@ class LibraryScreenState extends State<LibraryScreen>
             index,
             RepaintBoundary(
               child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
+                margin: EdgeInsets.only(bottom: isCompact ? 6 : 8),
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   border: Border.all(
@@ -1734,6 +1957,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 ),
               ),
             ),
+            layout,
           );
         },
         childCount: playlists.length,
@@ -1746,11 +1970,23 @@ class LibraryScreenState extends State<LibraryScreen>
     final path = songs.isNotEmpty ? songs.first.artworkPath : null;
 
     if (path == null || path.isEmpty) {
-      return Center(
-        child: Icon(
-          Icons.queue_music_rounded,
-          color: AppTheme.accent,
-          size: 44,
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppTheme.accent.withValues(alpha: 0.25),
+              AppTheme.accent.withValues(alpha: 0.08),
+            ],
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            Icons.queue_music_rounded,
+            color: AppTheme.accent,
+            size: 44,
+          ),
         ),
       );
     }
@@ -1842,6 +2078,7 @@ class LibraryScreenState extends State<LibraryScreen>
     Playlist playlist,
     List<Song> songs,
     bool isDesktop,
+    _LayoutSize layout,
   ) {
     final songByPath = {
       for (final song in songs)
@@ -1961,7 +2198,7 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildContent(List<Song> songs, bool isDesktop) {
+  Widget _buildContent(List<Song> songs, bool isDesktop, _LayoutSize layout) {
     if (_selectedTab == _LibraryTab.playlists && _openedPlaylistId == null) {
       if (_playlistService.playlists.isEmpty) {
         return _emptyState(
@@ -1970,7 +2207,7 @@ class LibraryScreenState extends State<LibraryScreen>
           message: 'Crea o importa una playlist para organizar tus canciones.',
         );
       }
-      return _buildPlaylistsCollection(isDesktop);
+      return _buildPlaylistsCollection(isDesktop, layout);
     }
     if (_selectedTab == _LibraryTab.playlists && _openedPlaylistId != null) {
       final playlist = _playlistService.findById(_openedPlaylistId!);
@@ -1987,7 +2224,7 @@ class LibraryScreenState extends State<LibraryScreen>
           message:
               'Añade canciones con el botón de añadir canciones de arriba.',
         );
-      return _buildPlaylistSongList(playlist, songs, isDesktop);
+      return _buildPlaylistSongList(playlist, songs, isDesktop, layout);
     }
     if (songs.isEmpty) {
       final favorites = _selectedTab == _LibraryTab.favorites;
@@ -2040,14 +2277,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
     if (_selectedTab == _LibraryTab.artists && _openedArtist == null) {
       return _artistsGridMode
-          ? _buildCollectionGrid(songs, isDesktop, isArtist: true)
-          : _buildCollectionList(songs, isDesktop, isArtist: true);
+          ? _buildCollectionGrid(songs, isDesktop, layout, isArtist: true)
+          : _buildCollectionList(songs, isDesktop, layout, isArtist: true);
     }
 
     if (_selectedTab == _LibraryTab.albums && _openedAlbum == null) {
       return _albumsGridMode
-          ? _buildCollectionGrid(songs, isDesktop, isArtist: false)
-          : _buildCollectionList(songs, isDesktop, isArtist: false);
+          ? _buildCollectionGrid(songs, isDesktop, layout, isArtist: false)
+          : _buildCollectionList(songs, isDesktop, layout, isArtist: false);
     }
 
     if (_selectedTab == _LibraryTab.podcasts && _openedPodcast == null) {
@@ -2055,12 +2292,14 @@ class LibraryScreenState extends State<LibraryScreen>
           ? _buildCollectionGrid(
               songs,
               isDesktop,
+              layout,
               isArtist: false,
               isPodcast: true,
             )
           : _buildCollectionList(
               songs,
               isDesktop,
+              layout,
               isArtist: false,
               isPodcast: true,
             );
@@ -2069,6 +2308,7 @@ class LibraryScreenState extends State<LibraryScreen>
     return _buildSongListContainer(
       songs: songs,
       isDesktop: isDesktop,
+      layout: layout,
       reordering: _selectedTab == _LibraryTab.favorites && _reorderingFavorites,
     );
   }
@@ -2076,6 +2316,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget _buildSongListContainer({
     required List<Song> songs,
     required bool isDesktop,
+    required _LayoutSize layout,
     required bool reordering,
   }) {
     final Widget list;
@@ -2218,10 +2459,13 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _buildCollectionList(
     List<Song> songs,
-    bool isDesktop, {
+    bool isDesktop,
+    _LayoutSize layout, {
     required bool isArtist,
     bool isPodcast = false,
   }) {
+    final isCompact = layout == _LayoutSize.compact;
+
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
@@ -2244,7 +2488,7 @@ class LibraryScreenState extends State<LibraryScreen>
                   borderRadius: BorderRadius.circular(16),
                 ),
 
-                margin: const EdgeInsets.only(bottom: 8),
+                margin: EdgeInsets.only(bottom: isCompact ? 6 : 8),
 
                 child: Material(
                   color: Colors.transparent,
@@ -2294,6 +2538,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 ),
               ),
             ),
+            layout,
           );
         },
 
@@ -2306,7 +2551,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _buildCollectionGrid(
     List<Song> songs,
-    bool isDesktop, {
+    bool isDesktop,
+    _LayoutSize layout, {
     required bool isArtist,
     bool isPodcast = false,
   }) {
@@ -2406,6 +2652,7 @@ class LibraryScreenState extends State<LibraryScreen>
                     ),
                   ),
                 ),
+                layout,
               );
             },
             childCount: songs.length,
@@ -2440,8 +2687,6 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  // [PODCAST] Fila de canción que añade progreso + badge "Terminado"
-  // cuando estamos dentro de un podcast.
   Widget _buildSongRow({
     required Song song,
     required bool isDesktop,
@@ -2761,11 +3006,14 @@ class _ViewModeButton extends StatelessWidget {
 
   final VoidCallback onTap;
 
+  final double size;
+
   const _ViewModeButton({
     required this.icon,
     required this.selected,
     required this.tooltip,
     required this.onTap,
+    this.size = 38,
   });
 
   @override
@@ -2781,11 +3029,11 @@ class _ViewModeButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(9),
           child: SizedBox(
-            width: 38,
-            height: 36,
+            width: size,
+            height: size - 2,
             child: Icon(
               icon,
-              size: 21,
+              size: size * 0.55,
               color: selected ? AppTheme.accent : AppTheme.textSecondary,
             ),
           ),
@@ -2853,276 +3101,6 @@ class _EmptyLibraryState extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PlaylistNameDialog extends StatefulWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final String confirmLabel;
-  final String? initialName;
-
-  const _PlaylistNameDialog({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.confirmLabel,
-    this.initialName,
-  });
-
-  @override
-  State<_PlaylistNameDialog> createState() => _PlaylistNameDialogState();
-}
-
-class _PlaylistNameDialogState extends State<_PlaylistNameDialog> {
-  static const int _maxLength = 80;
-
-  late final TextEditingController _controller;
-  late final FocusNode _focusNode;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialName ?? '');
-    _focusNode = FocusNode();
-    if (_controller.text.isNotEmpty) {
-      _controller.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: _controller.text.length,
-      );
-    }
-  }
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final value = _controller.text.trim();
-    if (value.isEmpty) return;
-    Navigator.pop(context, value);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Dialog(
-      backgroundColor: AppTheme.surfaceVariant,
-      surfaceTintColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 430),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 16, 20),
-              child: Row(
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(13),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppTheme.accent,
-                          Color.lerp(AppTheme.accent, Colors.black, 0.65)!,
-                        ],
-                      ),
-                    ),
-                    child: Icon(widget.icon, color: Colors.white, size: 27),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.title,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          widget.subtitle,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Cerrar',
-                  ),
-                ],
-              ),
-            ),
-            Divider(
-              height: 1,
-              color: AppTheme.textSecondary.withValues(alpha: 0.16),
-            ),
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: _controller,
-              builder: (context, value, _) {
-                final length = value.text.length;
-
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Nombre de la playlist',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ),
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: length == 0
-                                  ? AppTheme.accent.withValues(alpha: 0.07)
-                                  : AppTheme.accent.withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(50),
-                            ),
-                            child: Text(
-                              '$length/$_maxLength',
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: AppTheme.accent,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        autofocus: true,
-                        maxLength: _maxLength,
-                        textInputAction: TextInputAction.done,
-                        textCapitalization: TextCapitalization.sentences,
-                        onSubmitted: (_) => _submit(),
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
-                        cursorColor: AppTheme.accent,
-                        decoration: InputDecoration(
-                          hintText: 'Escribe un nombre',
-                          counterText: '',
-                          filled: true,
-                          fillColor: AppTheme.surface,
-                          prefixIcon: Icon(
-                            Icons.edit_note_rounded,
-                            color: AppTheme.textSecondary,
-                          ),
-                          suffixIcon: value.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: 'Borrar',
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 20,
-                                  ),
-                                  onPressed: _controller.clear,
-                                ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 16,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(
-                              color: AppTheme.accent,
-                              width: 1.4,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-            Divider(
-              height: 1,
-              color: AppTheme.textSecondary.withValues(alpha: 0.16),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.textSecondary,
-                    ),
-                    child: const Text('Cancelar'),
-                  ),
-                  const SizedBox(width: 8),
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: _controller,
-                    builder: (context, value, _) {
-                      return FilledButton.icon(
-                        onPressed: value.text.trim().isEmpty ? null : _submit,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.accent,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: AppTheme.accent.withValues(
-                            alpha: 0.3,
-                          ),
-                          disabledForegroundColor: Colors.white70,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        icon: const Icon(Icons.check_rounded),
-                        label: Text(widget.confirmLabel),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

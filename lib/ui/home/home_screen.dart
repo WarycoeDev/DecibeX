@@ -13,6 +13,8 @@ import '../library/song_list_tile.dart';
 import '../../core/services/playback_queue.dart';
 import '../../core/services/playback_service.dart';
 
+enum _LayoutSize { compact, medium, expanded }
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -90,7 +92,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Song> _buildMostPlayed() {
-    // Si no hay directorios configurados, no mostrar nada.
     if (!_hasDirectories) return const [];
 
     final songs = _scanner.songs;
@@ -200,6 +201,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  _LayoutSize _layoutFor(double width) {
+    if (width < 400) return _LayoutSize.compact;
+    if (width < 800) return _LayoutSize.medium;
+    return _LayoutSize.expanded;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -212,67 +219,62 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return LayoutBuilder(
           builder: (context, constraints) {
-            final isDesktop = constraints.maxWidth >= 800;
+            final layout = _layoutFor(constraints.maxWidth);
+            final isCompact = layout == _LayoutSize.compact;
 
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                isDesktop ? 36 : 20,
-                isDesktop ? 32 : 24,
-                isDesktop ? 36 : 20,
-                36,
-              ),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1440),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildWelcome(context, isDesktop),
-                      SizedBox(height: isDesktop ? 40 : 36),
-                      _buildSectionTitle(
-                        context,
-                        title: 'Más escuchadas',
-                        subtitle: 'Las canciones que más suenan',
-                        icon: Icons.trending_up_rounded,
-                        isDesktop: isDesktop,
-                      ),
-                      SizedBox(height: isDesktop ? 24 : 20),
-                      _buildPopularCarousel(context, mostPlayed, isDesktop),
-                      SizedBox(height: isDesktop ? 48 : 40),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildSectionTitle(
-                              context,
-                              title: 'Tus favoritos',
-                              subtitle: 'Tu colección personal',
-                              icon: Icons.favorite_rounded,
-                              isDesktop: isDesktop,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton.filledTonal(
-                            tooltip: 'Agregar todos a la cola',
-                            onPressed: favorites.isEmpty
-                                ? null
-                                : () => _addAllFavoritesToQueue(favorites),
-                            icon: const Icon(Icons.queue_music_rounded),
-                          ),
-                          const SizedBox(width: 8),
-                          FilledButton.icon(
-                            onPressed: favorites.isEmpty
-                                ? null
-                                : () => _playAllFavorites(favorites),
-                            icon: const Icon(Icons.play_arrow_rounded),
-                            label: Text(
-                              isDesktop ? 'Reproducir todo' : 'Reproducir',
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: isDesktop ? 22 : 18),
-                      _buildFavoritesList(favorites, isDesktop),
-                    ],
+            final horizontal = switch (layout) {
+              _LayoutSize.compact => 16.0,
+              _LayoutSize.medium => 20.0,
+              _LayoutSize.expanded => 36.0,
+            };
+            final top = switch (layout) {
+              _LayoutSize.compact => 18.0,
+              _LayoutSize.medium => 24.0,
+              _LayoutSize.expanded => 32.0,
+            };
+
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(horizontal, top, horizontal, 32),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1440),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildWelcome(context, layout),
+                        SizedBox(
+                          height: isCompact
+                              ? 24
+                              : (layout == _LayoutSize.expanded ? 40 : 36),
+                        ),
+                        _buildSectionTitle(
+                          context,
+                          title: 'Más escuchadas',
+                          subtitle: 'Las canciones que más suenan',
+                          icon: Icons.trending_up_rounded,
+                          layout: layout,
+                        ),
+                        SizedBox(
+                          height: isCompact
+                              ? 16
+                              : (layout == _LayoutSize.expanded ? 24 : 20),
+                        ),
+                        _buildPopularCarousel(context, mostPlayed, layout),
+                        SizedBox(
+                          height: isCompact
+                              ? 28
+                              : (layout == _LayoutSize.expanded ? 48 : 40),
+                        ),
+                        _buildFavoritesHeader(context, favorites, layout),
+                        SizedBox(
+                          height: isCompact
+                              ? 16
+                              : (layout == _LayoutSize.expanded ? 22 : 18),
+                        ),
+                        _buildFavoritesList(favorites, layout),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -283,32 +285,46 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildWelcome(BuildContext context, bool isDesktop) {
+  Widget _buildWelcome(BuildContext context, _LayoutSize layout) {
     final theme = Theme.of(context);
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
+
+    final headlineStyle =
+        (isDesktop
+                ? theme.textTheme.headlineLarge
+                : theme.textTheme.headlineSmall)
+            ?.copyWith(
+              fontWeight: FontWeight.bold,
+              letterSpacing: -0.8,
+              height: 1.15,
+            );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'TU ESPACIO MUSICAL',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
             color: AppTheme.accent,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.6,
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: isCompact ? 8 : 10),
         Text(
           'Tu música, a tu manera.',
-          style:
-              (isDesktop
-                      ? theme.textTheme.headlineLarge
-                      : theme.textTheme.headlineSmall)
-                  ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: -0.8),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: headlineStyle,
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: isCompact ? 6 : 8),
         Text(
           'Todo lo que te gusta escuchar, en un solo lugar.',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: AppTheme.textSecondary,
           ),
@@ -322,20 +338,24 @@ class _HomeScreenState extends State<HomeScreen> {
     required String title,
     required String subtitle,
     required IconData icon,
-    required bool isDesktop,
+    required _LayoutSize layout,
   }) {
     final theme = Theme.of(context);
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
+
+    final boxSize = isDesktop ? 44.0 : (isCompact ? 36.0 : 40.0);
 
     return Row(
       children: [
         Container(
-          width: isDesktop ? 44 : 40,
-          height: isDesktop ? 44 : 40,
+          width: boxSize,
+          height: boxSize,
           decoration: BoxDecoration(
             color: AppTheme.surfaceVariant,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: AppTheme.accent, size: isDesktop ? 23 : 21),
+          child: Icon(icon, color: AppTheme.accent, size: boxSize * 0.52),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -344,6 +364,8 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Text(
                 title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -351,6 +373,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 3),
               Text(
                 subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                 ),
@@ -362,10 +386,98 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Título "Tus favoritos" + subtítulo en una columna, pero los controles
+  /// de reproducción siempre alineados a la derecha en la MISMA línea que el
+  /// título. El subtítulo queda debajo del título (no de los botones).
+  Widget _buildFavoritesHeader(
+    BuildContext context,
+    List<Song> favorites,
+    _LayoutSize layout,
+  ) {
+    final theme = Theme.of(context);
+    final isDesktop = layout == _LayoutSize.expanded;
+    final isCompact = layout == _LayoutSize.compact;
+
+    final boxSize = isDesktop ? 44.0 : (isCompact ? 36.0 : 40.0);
+
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Tus favoritos',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          'Tu colección personal',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: AppTheme.textSecondary,
+          ),
+        ),
+      ],
+    );
+
+    final actions = <Widget>[
+      IconButton.filledTonal(
+        tooltip: 'Agregar todos a la cola',
+        onPressed: favorites.isEmpty
+            ? null
+            : () => _addAllFavoritesToQueue(favorites),
+        icon: const Icon(Icons.queue_music_rounded),
+      ),
+      const SizedBox(width: 8),
+      if (isCompact)
+        IconButton.filled(
+          tooltip: 'Reproducir todo',
+          onPressed: favorites.isEmpty
+              ? null
+              : () => _playAllFavorites(favorites),
+          icon: const Icon(Icons.play_arrow_rounded),
+        )
+      else
+        FilledButton.icon(
+          onPressed: favorites.isEmpty
+              ? null
+              : () => _playAllFavorites(favorites),
+          icon: const Icon(Icons.play_arrow_rounded),
+          label: Text(isDesktop ? 'Reproducir todo' : 'Reproducir'),
+        ),
+    ];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: boxSize,
+          height: boxSize,
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.favorite_rounded,
+            color: AppTheme.accent,
+            size: boxSize * 0.52,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: titleBlock),
+        const SizedBox(width: 8),
+        ...actions,
+      ],
+    );
+  }
+
   Widget _buildPopularCarousel(
     BuildContext context,
     List<Song> songs,
-    bool isDesktop,
+    _LayoutSize layout,
   ) {
     if (songs.isEmpty) {
       final String title;
@@ -419,8 +531,24 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final cardWidth = isDesktop ? 200.0 : 152.0;
-    final carouselHeight = cardWidth + 10 + 22 + 3 + 18 + 4;
+    final double cardWidth;
+    final double gap;
+    switch (layout) {
+      case _LayoutSize.compact:
+        final available = MediaQuery.sizeOf(context).width - 32;
+        cardWidth = ((available - 12) / 2.15).clamp(108.0, 140.0);
+        gap = 12;
+      case _LayoutSize.medium:
+        cardWidth = 152;
+        gap = 16;
+      case _LayoutSize.expanded:
+        cardWidth = 200;
+        gap = 20;
+    }
+
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final textBlockHeight = 10 + (22 + 3 + 18) * textScale + 4;
+    final carouselHeight = cardWidth + textBlockHeight;
 
     return SizedBox(
       height: carouselHeight,
@@ -438,7 +566,7 @@ class _HomeScreenState extends State<HomeScreen> {
           scrollDirection: Axis.horizontal,
           physics: const AlwaysScrollableScrollPhysics(),
           itemCount: songs.length,
-          separatorBuilder: (_, index) => SizedBox(width: isDesktop ? 20 : 16),
+          separatorBuilder: (_, index) => SizedBox(width: gap),
           itemBuilder: (context, index) {
             final song = songs[index];
             return _PopularSongCard(
@@ -454,7 +582,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildFavoritesList(List<Song> favorites, bool isDesktop) {
+  Widget _buildFavoritesList(List<Song> favorites, _LayoutSize layout) {
     if (favorites.isEmpty) {
       return Container(
         width: double.infinity,
@@ -497,13 +625,14 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           for (final song in favorites)
             SongListTile(
               key: ValueKey(song.filePath),
               song: song,
-              isDesktop: isDesktop,
+              isDesktop: layout == _LayoutSize.expanded,
               onFavoriteChanged: (favorite) {
                 _scanner.setFavorite(song, favorite);
               },
@@ -553,9 +682,12 @@ class _PopularSongCard extends StatelessWidget {
                   ),
                   Positioned(left: 9, top: 9, child: _RankBadge(rank: rank)),
                   Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: _PlayButton(onTap: onTap),
+                    right: 6,
+                    bottom: 6,
+                    child: _PlayButton(
+                      onTap: onTap,
+                      size: width < 130 ? 34 : 38,
+                    ),
                   ),
                 ],
               ),
@@ -583,24 +715,19 @@ class _PopularSongCard extends StatelessWidget {
                   ),
                 ),
                 if (playCount > 0) ...[
-                  const SizedBox(width: 6),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '$playCount',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        size: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ],
+                  const SizedBox(width: 4),
+                  Text(
+                    '$playCount',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.play_arrow_rounded,
+                    size: 12,
+                    color: AppTheme.textSecondary,
                   ),
                 ],
               ],
@@ -638,8 +765,9 @@ class _RankBadge extends StatelessWidget {
 
 class _PlayButton extends StatelessWidget {
   final VoidCallback onTap;
+  final double size;
 
-  const _PlayButton({required this.onTap});
+  const _PlayButton({required this.onTap, this.size = 38});
 
   @override
   Widget build(BuildContext context) {
@@ -654,12 +782,12 @@ class _PlayButton extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 38,
-          height: 38,
+          width: size,
+          height: size,
           child: Icon(
             Icons.play_arrow_rounded,
             color: colorScheme.onPrimary,
-            size: 25,
+            size: size * 0.66,
           ),
         ),
       ),
