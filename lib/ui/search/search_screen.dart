@@ -1049,6 +1049,9 @@ class _SearchScreenState extends State<SearchScreen>
       );
     }
 
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final cacheSize = (48 * pixelRatio).round().clamp(1, 512);
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: SizedBox(
@@ -1057,8 +1060,11 @@ class _SearchScreenState extends State<SearchScreen>
         child: Image.file(
           File(artworkPath),
           fit: BoxFit.cover,
-          cacheWidth: 144,
-          cacheHeight: 144,
+          alignment: Alignment.center,
+          // Solo limitamos el ancho; el alto se calcula
+          // proporcionalmente para no deformar la imagen.
+          cacheWidth: cacheSize,
+          filterQuality: FilterQuality.low,
           errorBuilder: (context, error, stackTrace) => placeholder(),
         ),
       ),

@@ -835,15 +835,19 @@ class _SongArtwork extends StatelessWidget {
     if (artworkPath != null && artworkPath.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(11),
-        child: Image.file(
-          File(artworkPath),
+        child: SizedBox(
           width: size,
           height: size,
-          fit: BoxFit.cover,
-          cacheWidth: cacheSize,
-          cacheHeight: cacheSize,
-          filterQuality: FilterQuality.low,
-          errorBuilder: (context, error, stackTrace) => _placeholder(),
+          child: Image.file(
+            File(artworkPath),
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            // Solo limitamos el ancho; el alto se calcula
+            // proporcionalmente para no deformar la imagen.
+            cacheWidth: cacheSize,
+            filterQuality: FilterQuality.low,
+            errorBuilder: (context, error, stackTrace) => _placeholder(),
+          ),
         ),
       );
     }

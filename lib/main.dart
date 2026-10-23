@@ -13,9 +13,11 @@ import 'core/services/settings_service.dart';
 import 'core/services/statistics_service.dart';
 import 'core/services/podcast_statistics_service.dart';
 import 'package:universal_youtube_player/universal_youtube_player.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 Future<void> main() async {
   UniversalYoutubePlayerBootstrap.ensureInitialized();
+  JustAudioMediaKit.ensureInitialized();
   // Captura errores de la zona raíz para ver el stack trace real en consola.
   runZonedGuarded<Future<void>>(
     () async {

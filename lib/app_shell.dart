@@ -25,6 +25,7 @@ class _AppShellState extends State<AppShell> {
   bool _desktopPlayerExpanded = false;
 
   // [NUEVO] Controla si la pantalla de YouTube está abierta.
+  // Solo se usa en móvil; en desktop siempre permanece false.
   bool _youtubeOpen = false;
 
   // Estado del miniplayer móvil minimizado (oculto detrás de la barra).
@@ -125,7 +126,9 @@ class _AppShellState extends State<AppShell> {
   }
 
   // [NUEVO] Abre/cierra la pantalla de YouTube con el mismo botón.
+  // Solo disponible en móvil: en desktop se ignora.
   void _toggleYouTube() {
+    if (_isDesktop(context)) return;
     setState(() {
       _youtubeOpen = !_youtubeOpen;
     });
@@ -240,6 +243,7 @@ class _AppShellState extends State<AppShell> {
 
   void _handleBack() {
     // [NUEVO] Si YouTube está abierto, el back lo cierra primero.
+    // (Solo puede ocurrir en móvil.)
     if (_youtubeOpen) {
       setState(() {
         _youtubeOpen = false;
@@ -290,6 +294,7 @@ class _AppShellState extends State<AppShell> {
 
     return PopScope<Object?>(
       // [NUEVO] No se puede hacer pop del shell si YouTube está abierto.
+      // En desktop _youtubeOpen siempre es false.
       canPop: _selectedIndex == 0 && !_youtubeOpen,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
@@ -331,46 +336,47 @@ class _AppShellState extends State<AppShell> {
                                 ),
 
                                 // [AJUSTE] Panel de YouTube dentro del área
-                                // de contenido. No cubre chrome de la app.
-                                Positioned.fill(
-                                  child: IgnorePointer(
-                                    ignoring: !_youtubeOpen,
-                                    child: AnimatedSwitcher(
-                                      duration: const Duration(
-                                        milliseconds: 260,
-                                      ),
-                                      switchInCurve: Curves.easeOutCubic,
-                                      switchOutCurve: Curves.easeInCubic,
-                                      transitionBuilder: (child, animation) {
-                                        final slide = Tween<Offset>(
-                                          begin: const Offset(0, 0.04),
-                                          end: Offset.zero,
-                                        ).animate(animation);
+                                // de contenido. Solo se monta en móvil.
+                                if (!isDesktop)
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      ignoring: !_youtubeOpen,
+                                      child: AnimatedSwitcher(
+                                        duration: const Duration(
+                                          milliseconds: 260,
+                                        ),
+                                        switchInCurve: Curves.easeOutCubic,
+                                        switchOutCurve: Curves.easeInCubic,
+                                        transitionBuilder: (child, animation) {
+                                          final slide = Tween<Offset>(
+                                            begin: const Offset(0, 0.04),
+                                            end: Offset.zero,
+                                          ).animate(animation);
 
-                                        return FadeTransition(
-                                          opacity: animation,
-                                          child: SlideTransition(
-                                            position: slide,
-                                            child: child,
-                                          ),
-                                        );
-                                      },
-                                      child: _youtubeOpen
-                                          ? Container(
-                                              key: const ValueKey<String>(
-                                                'youtube-open',
-                                              ),
-                                              color: AppTheme.surface,
-                                              child: const YouTubeScreen(),
-                                            )
-                                          : const SizedBox.shrink(
-                                              key: ValueKey<String>(
-                                                'youtube-closed',
-                                              ),
+                                          return FadeTransition(
+                                            opacity: animation,
+                                            child: SlideTransition(
+                                              position: slide,
+                                              child: child,
                                             ),
+                                          );
+                                        },
+                                        child: _youtubeOpen
+                                            ? Container(
+                                                key: const ValueKey<String>(
+                                                  'youtube-open',
+                                                ),
+                                                color: AppTheme.surface,
+                                                child: const YouTubeScreen(),
+                                              )
+                                            : const SizedBox.shrink(
+                                                key: ValueKey<String>(
+                                                  'youtube-closed',
+                                                ),
+                                              ),
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
@@ -569,25 +575,27 @@ class _AppShellState extends State<AppShell> {
           Expanded(
             child: Text(
               // [NUEVO] El título muestra "YouTube" cuando esa pantalla
-              // está abierta.
+              // está abierta. (Solo posible en móvil.)
               _youtubeOpen ? 'YouTube' : _titles[_selectedIndex],
               style: Theme.of(context).textTheme.titleMedium,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           // [NUEVO] Mismo botón para abrir y cerrar la pantalla de YouTube.
-          IconButton(
-            tooltip: _youtubeOpen ? 'Cerrar YouTube' : 'Abrir YouTube',
-            icon: Icon(
-              _youtubeOpen
-                  ? Icons.close_rounded
-                  : Icons.play_circle_outline_rounded,
+          // Solo visible en móvil: en desktop se oculta.
+          if (!_isDesktop(context))
+            IconButton(
+              tooltip: _youtubeOpen ? 'Cerrar YouTube' : 'Abrir YouTube',
+              icon: Icon(
+                _youtubeOpen
+                    ? Icons.close_rounded
+                    : Icons.play_circle_outline_rounded,
+              ),
+              color: _youtubeOpen
+                  ? AppTheme.accent
+                  : const Color.fromARGB(255, 255, 255, 255),
+              onPressed: _toggleYouTube,
             ),
-            color: _youtubeOpen
-                ? AppTheme.accent
-                : const Color.fromARGB(255, 255, 255, 255),
-            onPressed: _toggleYouTube,
-          ),
         ],
       ),
     );

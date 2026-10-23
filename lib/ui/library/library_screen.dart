@@ -1998,6 +1998,11 @@ class LibraryScreenState extends State<LibraryScreen>
     return Image.file(
       File(path),
       fit: BoxFit.cover,
+      alignment: Alignment.center,
+      // El tamaño lo fija el SizedBox/ClipRRect que envuelve este widget.
+      // Solo limitamos el ancho de decodificación para no deformar.
+      cacheWidth: 360,
+      filterQuality: FilterQuality.low,
       errorBuilder: (context, error, stackTrace) => Center(
         child: Icon(
           Icons.queue_music_rounded,
@@ -2453,8 +2458,11 @@ class LibraryScreenState extends State<LibraryScreen>
         child: Image.file(
           File(artworkPath),
           fit: BoxFit.cover,
+          alignment: Alignment.center,
+          // Solo limitamos el ancho; el alto se calcula
+          // proporcionalmente para no deformar la imagen.
           cacheWidth: 144,
-          cacheHeight: 144,
+          filterQuality: FilterQuality.low,
           errorBuilder: (context, error, stackTrace) => placeholder(),
         ),
       ),
@@ -2685,8 +2693,11 @@ class LibraryScreenState extends State<LibraryScreen>
     return Image.file(
       File(path),
       fit: BoxFit.cover,
+      alignment: Alignment.center,
+      // Solo limitamos el ancho; el alto se calcula
+      // proporcionalmente para no deformar la imagen.
       cacheWidth: 360,
-      cacheHeight: 360,
+      filterQuality: FilterQuality.low,
       errorBuilder: (context, error, stackTrace) => placeholder(),
     );
   }

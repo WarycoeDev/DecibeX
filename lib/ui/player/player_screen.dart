@@ -1743,8 +1743,11 @@ class _QueueListView extends StatelessWidget {
                                   Image.file(
                                     File(artworkPath),
                                     fit: BoxFit.cover,
+                                    alignment: Alignment.center,
+                                    // Solo limitamos el ancho; el alto se calcula
+                                    // proporcionalmente para no deformar la imagen.
                                     cacheWidth: 144,
-                                    cacheHeight: 144,
+                                    filterQuality: FilterQuality.low,
                                     errorBuilder: (context, error, stackTrace) {
                                       return artworkFallback(colors);
                                     },
