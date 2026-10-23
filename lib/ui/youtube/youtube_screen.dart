@@ -671,59 +671,89 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
     );
   }
 
+  /// Tile estilo playlist (selección con check circular animado).
   Widget _optionTile({
     required IconData icon,
     required String title,
     required String subtitle,
     required VoidCallback onTap,
     bool selected = false,
+    bool showCheck = true,
   }) {
-    return Material(
-      color: selected
-          ? AppTheme.accent.withValues(alpha: 0.14)
-          : AppTheme.surfaceVariant.withValues(alpha: 0.25),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                color: selected ? AppTheme.accent : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: selected ? AppTheme.accent : null,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: selected
+            ? AppTheme.accent.withValues(alpha: 0.14)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: selected ? AppTheme.accent : AppTheme.textSecondary,
                 ),
-              ),
-              if (selected)
-                Icon(Icons.check_circle_rounded, color: AppTheme.accent),
-            ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: selected
+                              ? AppTheme.accent
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (showCheck) ...[
+                  const SizedBox(width: 8),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: selected ? AppTheme.accent : Colors.transparent,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected
+                            ? AppTheme.accent
+                            : AppTheme.surfaceVariant,
+                        width: 1.5,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: selected
+                        ? const Icon(
+                            Icons.check_rounded,
+                            size: 15,
+                            color: Colors.white,
+                          )
+                        : null,
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
@@ -758,141 +788,280 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Container(
-        margin: const EdgeInsets.all(12),
-        padding: EdgeInsets.fromLTRB(
-          20,
-          20,
-          20,
-          20 + MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppTheme.surfaceVariant),
-        ),
-        child: SingleChildScrollView(child: _buildForm(context)),
-      ),
-    );
-  }
+    final theme = Theme.of(context);
 
-  Widget _buildForm(BuildContext context) {
     final canDownload =
         _selectedFormat != null &&
         _nameController.text.trim().isNotEmpty &&
         _directory.isNotEmpty;
 
-    return Column(
-      key: const ValueKey('form'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Descargar',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ),
-            IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close_rounded),
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
-        Text(
-          widget.video.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 20),
-        Text(
-          'Directorio de guardado',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 8),
-        _optionTile(
-          icon: Icons.folder_outlined,
-          title: _directory.isEmpty ? 'Elegir carpeta' : _directory,
-          subtitle: 'Seleccionar ubicación',
-          onTap: () async {
-            final picked = await FilePicker.getDirectoryPath(
-              dialogTitle: 'Elegir carpeta de descarga',
-              initialDirectory: _directory.isEmpty ? null : _directory,
-            );
-
-            if (picked != null) {
-              setState(() => _directory = picked);
-            }
-          },
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Nombre del archivo',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _nameController,
-          onChanged: (_) => setState(() {}),
-          decoration: _inputDecoration(
-            'Nombre sin extensión',
-            Icons.drive_file_rename_outline_rounded,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.88,
           ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Formato de descarga',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 8),
-        for (final format in AudioFormat.values)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: _optionTile(
-              icon: format.icon,
-              title: format.label,
-              subtitle: format.subtitle,
-              selected: _selectedFormat == format,
-              onTap: () {
-                setState(() => _selectedFormat = format);
-              },
-            ),
-          ),
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: canDownload ? _confirmDownload : null,
-                icon: const Icon(Icons.download_rounded),
-                label: const Text('Descargar'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.accent,
-                  foregroundColor: Colors.white,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle superior
+              Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 18),
+
+              // Cabecera con thumbnail rectangular (16:9) + título
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          // Proporción 16:9 para que la carátula se vea completa.
+                          width: 128,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.surfaceVariant,
+                              width: 0.7,
+                            ),
+                            color: AppTheme.surfaceVariant,
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.network(
+                            widget.video.thumbnails.highResUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => ColoredBox(
+                              color: AppTheme.surfaceVariant,
+                              child: Icon(
+                                Icons.video_library_rounded,
+                                color: AppTheme.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: -6,
+                          bottom: -6,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTheme.accent,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppTheme.surface,
+                                width: 3,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.download_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Descargar',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.video.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.video.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Cerrar',
+                      visualDensity: VisualDensity.compact,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Contenido scrollable
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Directorio de guardado',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _optionTile(
+                        icon: Icons.folder_outlined,
+                        title: _directory.isEmpty
+                            ? 'Elegir carpeta'
+                            : _directory,
+                        subtitle: 'Seleccionar ubicación',
+                        showCheck: false,
+                        onTap: () async {
+                          final picked = await FilePicker.getDirectoryPath(
+                            dialogTitle: 'Elegir carpeta de descarga',
+                            initialDirectory: _directory.isEmpty
+                                ? null
+                                : _directory,
+                          );
+
+                          if (picked != null) {
+                            setState(() => _directory = picked);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Nombre del archivo',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _nameController,
+                        onChanged: (_) => setState(() {}),
+                        decoration: _inputDecoration(
+                          'Nombre sin extensión',
+                          Icons.drive_file_rename_outline_rounded,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Formato de descarga',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (final format in AudioFormat.values)
+                        _optionTile(
+                          icon: format.icon,
+                          title: format.label,
+                          subtitle: format.subtitle,
+                          selected: _selectedFormat == format,
+                          onTap: () {
+                            setState(() => _selectedFormat = format);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Botones cuadrados estilo playlist
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(
+                            color: AppTheme.surfaceVariant,
+                            width: 0.9,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: canDownload ? _confirmDownload : null,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.accent,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppTheme.surfaceVariant,
+                          disabledForegroundColor: AppTheme.textSecondary,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('Descargar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
 }
 
-/// Diálogo de progreso de descarga.
+/// Diálogo de descarga: progreso, completado y error en un solo widget
+/// con la misma estética que el bottom sheet de configuración.
 class _DownloadProgressDialog extends StatefulWidget {
   final Video video;
   final _DownloadRequest request;
@@ -1004,7 +1173,7 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
         extractAudio: true,
         audioFormat: widget.request.format.extension,
         audioQuality: 0,
-        embedMetadata: true,
+        embedMetadata: false,
         embedThumbnail: true,
         processId: processId,
         customOptions: {
@@ -1065,7 +1234,7 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
 
       if (!mounted) return;
 
-      unawaited(LibraryScanner.instance.scan());
+      //unawaited(LibraryScanner.instance.scan());
 
       setState(() {
         _progress = 100;
@@ -1088,101 +1257,252 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
 
   bool get _isBusy => _phase == _DialogPhase.downloading;
 
+  // ---------------------------------------------------------------------------
+  // Construcción unificada
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: !_isBusy,
       child: Dialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: BorderSide(color: AppTheme.surfaceVariant),
-        ),
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
         child: Container(
-          padding: const EdgeInsets.all(20),
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
-            child: _buildBody(context),
+          constraints: const BoxConstraints(maxWidth: 440),
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Handle superior
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // Cabecera con thumbnail rectangular 16:9 + badge de estado
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _buildHeader(context),
+                ),
+                const SizedBox(height: 18),
+
+                // Cuerpo variable según la fase
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: _buildBody(context),
+                    ),
+                  ),
+                ),
+
+                // Botones al pie
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                  child: _buildFooter(context),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Cabecera común (thumbnail rectangular + badge según estado)
+  // ---------------------------------------------------------------------------
+
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final (
+      Color badgeColor,
+      IconData badgeIcon,
+      String title,
+      String subtitle,
+    ) = switch (_phase) {
+      _DialogPhase.downloading => (
+        AppTheme.accent,
+        _isInitializing ? Icons.settings_rounded : Icons.download_rounded,
+        _isInitializing ? 'Preparando descargador' : 'Descargando…',
+        _isInitializing ? 'Esto puede tardar la primera vez' : _status,
+      ),
+      _DialogPhase.completed => (
+        AppTheme.accent,
+        Icons.check_rounded,
+        'Descarga completada',
+        widget.request.format.label,
+      ),
+      _DialogPhase.error => (
+        Colors.redAccent,
+        Icons.close_rounded,
+        'No se pudo descargar',
+        'Ocurrió un error inesperado',
+      ),
+    };
+
+    return Row(
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 128,
+              height: 72,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+                color: AppTheme.surfaceVariant,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Image.network(
+                widget.video.thumbnails.highResUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => ColoredBox(
+                  color: AppTheme.surfaceVariant,
+                  child: Icon(
+                    Icons.video_library_rounded,
+                    color: AppTheme.accent,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: -6,
+              bottom: -6,
+              child: Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.surface, width: 3),
+                ),
+                child: Icon(badgeIcon, size: 14, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                widget.video.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (!_isBusy)
+          IconButton(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close_rounded),
+            tooltip: 'Cerrar',
+            visualDensity: VisualDensity.compact,
+            color: AppTheme.textSecondary,
+          ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cuerpo variable
+  // ---------------------------------------------------------------------------
+
   Widget _buildBody(BuildContext context) {
     switch (_phase) {
       case _DialogPhase.downloading:
-        return _buildProgress(context);
+        return _buildProgressBody(context);
       case _DialogPhase.completed:
-        return _buildCompleted(context);
+        return _buildCompletedBody(context);
       case _DialogPhase.error:
-        return _buildError(context);
+        return _buildErrorBody(context);
     }
   }
 
-  Widget _buildProgress(BuildContext context) {
+  Widget _buildProgressBody(BuildContext context) {
     final theme = Theme.of(context);
     final hasProgress = _progress > 0;
 
     return Column(
       key: const ValueKey('progress'),
-      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: AppTheme.accent.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                _isInitializing
-                    ? Icons.settings_rounded
-                    : Icons.download_rounded,
-                size: 18,
-                color: AppTheme.accent,
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _isInitializing ? 'Preparando descargador' : 'Descargando…',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _isInitializing
-                        ? 'Esto puede tardar la primera vez'
-                        : _status,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
+              child: Text(
+                widget.video.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ),
-            if (hasProgress)
+            if (hasProgress) ...[
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
                   vertical: 5,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.accent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
+                  color: AppTheme.accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(50),
                 ),
                 child: Text(
                   '${_progress.toStringAsFixed(0)}%',
@@ -1192,18 +1512,10 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
                   ),
                 ),
               ),
+            ],
           ],
         ),
-        const SizedBox(height: 18),
-        Text(
-          widget.video.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: AppTheme.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: LinearProgressIndicator(
@@ -1213,7 +1525,7 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
             color: AppTheme.accent,
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 14),
         Text(
           'No cierres esta ventana mientras se descarga.',
           style: theme.textTheme.bodySmall?.copyWith(
@@ -1225,46 +1537,26 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
     );
   }
 
-  Widget _buildCompleted(BuildContext context) {
+  Widget _buildCompletedBody(BuildContext context) {
     final theme = Theme.of(context);
 
     return Column(
       key: const ValueKey('completed'),
-      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: AppTheme.accent.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                Icons.check_circle_rounded,
-                size: 20,
-                color: AppTheme.accent,
-              ),
-            ),
-            const SizedBox(width: 12),
+            Icon(Icons.check_circle_rounded, color: AppTheme.accent, size: 20),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Descarga completada',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+                'Archivo guardado correctamente',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 16),
-        Text(
-          widget.video.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodyMedium,
         ),
         if (_savedPath != null) ...[
           const SizedBox(height: 12),
@@ -1274,6 +1566,7 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
             decoration: BoxDecoration(
               color: AppTheme.surfaceVariant.withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
             ),
             child: Text(
               _savedPath!,
@@ -1283,16 +1576,32 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
             ),
           ),
         ],
-        const SizedBox(height: 20),
-        SizedBox(
+      ],
+    );
+  }
+
+  Widget _buildErrorBody(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      key: const ValueKey('error'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
           width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.done_rounded),
-            label: const Text('Cerrar'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.accent,
-              foregroundColor: Colors.white,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.red.withValues(alpha: 0.35),
+              width: 0.7,
+            ),
+          ),
+          child: Text(
+            _errorMessage ?? 'Ocurrió un error inesperado.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurface,
             ),
           ),
         ),
@@ -1300,62 +1609,52 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
     );
   }
 
-  Widget _buildError(BuildContext context) {
-    final theme = Theme.of(context);
+  // ---------------------------------------------------------------------------
+  // Pie con botones estilo menú
+  // ---------------------------------------------------------------------------
 
-    return Column(
-      key: const ValueKey('error'),
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.error_outline_rounded,
-                size: 20,
-                color: Colors.redAccent,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'No se pudo descargar',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Text(
-          _errorMessage ?? 'Ocurrió un error inesperado.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: AppTheme.textSecondary,
-          ),
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
+  Widget _buildFooter(BuildContext context) {
+    switch (_phase) {
+      case _DialogPhase.downloading:
+        // Sin botones durante la descarga (no se puede cerrar).
+        return const SizedBox.shrink();
+
+      case _DialogPhase.completed:
+        return SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close_rounded),
-            label: const Text('Cerrar'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.accent,
               foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
+            icon: const Icon(Icons.done_rounded, size: 18),
+            label: const Text('Cerrar'),
           ),
-        ),
-      ],
-    );
+        );
+
+      case _DialogPhase.error:
+        return SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () => Navigator.pop(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cerrar'),
+          ),
+        );
+    }
   }
 }
 

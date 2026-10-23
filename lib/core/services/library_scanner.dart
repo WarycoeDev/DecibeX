@@ -38,9 +38,13 @@ class LibraryScanner extends ChangeNotifier {
   static const int _publishBatchSize = 50;
 
   final Map<String, Map<String, dynamic>> _index = {};
-  final List<StreamSubscription<FileSystemEvent>> _watchers = [];
   final LinkedHashSet<String> _favoritePaths = LinkedHashSet<String>();
   final List<String> _favoriteOrderPaths = [];
+
+  // Watchers por directorio (para plataformas sin recursividad nativa).
+  final Map<String, StreamSubscription<FileSystemEvent>> _directoryWatchers =
+      {};
+  final Set<String> _watchedPaths = {};
 
   List<Song> _songs = [];
   List<String> _directories = [];
@@ -162,6 +166,10 @@ class LibraryScanner extends ChangeNotifier {
       await refreshConfiguration();
       if (_disposed) return;
 
+      // Refresco periódico de la configuración (settings.decibex).
+      // NO escanea la biblioteca: solo relee el archivo de configuración
+      // y, si cambió, reconfigura watchers y lanza un scan. Si no cambió,
+      // no hace nada.
       _periodicTimer = Timer.periodic(
         const Duration(seconds: 2),
         (_) => unawaited(refreshConfiguration()),
@@ -458,21 +466,9 @@ class LibraryScanner extends ChangeNotifier {
   }
 
   /// Configura el watcher del directorio de settings de forma segura.
-  ///
-  /// En Android, el directorio de settings (`.../data`) puede no existir
-  /// todavía en el primer arranque, y `Directory.watch()` lanza un assert
-  /// interno (`_MultiplexingFileSystemWatcher._startWatching`) si el path
-  /// no es un directorio válido en el momento exacto de la llamada.
-  ///
-  /// Por eso aquí:
-  ///  1. Cancelamos cualquier watcher previo (evita duplicados y fugas).
-  ///  2. Aseguramos que el directorio exista realmente justo antes de
-  ///     vigilarlo.
-  ///  3. Capturamos cualquier excepción para no tumbar el arranque.
   Future<void> _configureSettingsWatcher(Directory directory) async {
     if (_disposed) return;
 
-    // 1. Cancelar watcher anterior si lo hubiera.
     final previous = _settingsWatcher;
     if (previous != null) {
       _settingsWatcher = null;
@@ -483,7 +479,6 @@ class LibraryScanner extends ChangeNotifier {
     }
 
     try {
-      // 2. Crear y verificar el directorio justo antes de vigilarlo.
       if (!await directory.exists()) {
         await directory.create(recursive: true);
         if (_disposed) return;
@@ -491,7 +486,6 @@ class LibraryScanner extends ChangeNotifier {
         if (!await directory.exists()) return;
       }
 
-      // 3. Vigilar con manejo de errores para no romper el arranque.
       _settingsWatcher = directory
           .watch(events: FileSystemEvent.all, recursive: false)
           .listen(
@@ -500,8 +494,6 @@ class LibraryScanner extends ChangeNotifier {
             cancelOnError: false,
           );
     } catch (e) {
-      // No es crítico: si falla el watcher, el Timer.periodic de
-      // `initialize()` sigue refrescando la configuración cada 2s.
       debugPrint('[LibraryScanner] No se pudo vigilar settings: $e');
     }
   }
@@ -518,11 +510,10 @@ class LibraryScanner extends ChangeNotifier {
   }
 
   Future<void> _configureWatchers() async {
-    final oldWatchers = List<StreamSubscription<FileSystemEvent>>.from(
-      _watchers,
-    );
-
-    _watchers.clear();
+    // Cancelar todos los watchers anteriores.
+    final oldWatchers = _directoryWatchers.values.toList();
+    _directoryWatchers.clear();
+    _watchedPaths.clear();
 
     for (final watcher in oldWatchers) {
       try {
@@ -539,28 +530,108 @@ class LibraryScanner extends ChangeNotifier {
 
       try {
         final directory = Directory(path);
-        if (!await directory.exists()) continue;
+        if (!await directory.exists()) {
+          // Si el directorio no existe todavía, lo creamos para poder
+          // vigilarlo cuando el usuario lo cree después.
+          try {
+            await directory.create(recursive: true);
+          } catch (_) {
+            continue;
+          }
+        }
 
-        final subscription = directory
-            .watch(events: FileSystemEvent.all, recursive: _recursive)
-            .listen(
-              (_) => _scheduleScan(),
-              onError: (_) => _scheduleScan(),
-              cancelOnError: false,
-            );
-
-        _watchers.add(subscription);
+        await _watchDirectory(directory.path);
       } catch (e) {
         debugPrint('[LibraryScanner] No se pudo vigilar "$path": $e');
       }
     }
   }
 
+  /// Vigila un directorio concreto y, si [recursive] es true, también
+  /// todos sus subdirectorios (necesario porque `recursive: true` no
+  /// funciona en Android/iOS).
+  Future<void> _watchDirectory(String path) async {
+    if (_disposed) return;
+    if (_watchedPaths.contains(path)) return;
+
+    _watchedPaths.add(path);
+
+    try {
+      final directory = Directory(path);
+
+      // En plataformas donde `recursive` no funciona (Android/iOS),
+      // vigilamos cada subdirectorio individualmente.
+      final useNativeRecursive = !Platform.isAndroid && !Platform.isIOS;
+
+      if (useNativeRecursive && _recursive) {
+        final subscription = directory
+            .watch(events: FileSystemEvent.all, recursive: true)
+            .listen(
+              (event) => _handleFileSystemEvent(event),
+              onError: (Object e) {
+                debugPrint('[LibraryScanner] Watcher error en "$path": $e');
+                _scheduleScan();
+              },
+              cancelOnError: false,
+            );
+        _directoryWatchers[path] = subscription;
+      } else {
+        // Vigilamos este directorio (no recursivo).
+        final subscription = directory
+            .watch(events: FileSystemEvent.all, recursive: false)
+            .listen(
+              (event) => _handleFileSystemEvent(event),
+              onError: (Object e) {
+                debugPrint('[LibraryScanner] Watcher error en "$path": $e');
+                _scheduleScan();
+              },
+              cancelOnError: false,
+            );
+        _directoryWatchers[path] = subscription;
+      }
+
+      // Si es recursivo y no usamos recursividad nativa, recorremos
+      // los subdirectorios existentes y los vigilamos uno a uno.
+      if (_recursive && !useNativeRecursive) {
+        await for (final entity in directory.list(
+          recursive: false,
+          followLinks: false,
+        )) {
+          if (_disposed) return;
+          if (entity is Directory) {
+            await _watchDirectory(entity.path);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[LibraryScanner] No se pudo vigilar "$path": $e');
+    }
+  }
+
+  void _handleFileSystemEvent(FileSystemEvent event) {
+    if (_disposed) return;
+
+    // Si se crea un directorio nuevo, empezamos a vigilarlo también.
+    if (event is FileSystemCreateEvent || event is FileSystemModifyEvent) {
+      final path = event.path;
+      try {
+        final maybeDir = Directory(path);
+        if (maybeDir.existsSync()) {
+          unawaited(_watchDirectory(path));
+        }
+      } catch (_) {}
+    }
+
+    _scheduleScan();
+  }
+
   void _scheduleScan() {
     if (_disposed) return;
 
+    // Debounce para agrupar los múltiples eventos (create + modify + rename)
+    // que emiten los gestores de archivos al copiar un solo archivo.
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 350), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 800), () {
       if (!_disposed) {
         unawaited(scan());
       }
@@ -1052,11 +1123,12 @@ class LibraryScanner extends ChangeNotifier {
       unawaited(settingsWatcher.cancel());
     }
 
-    for (final watcher in _watchers) {
+    for (final watcher in _directoryWatchers.values) {
       unawaited(watcher.cancel());
     }
+    _directoryWatchers.clear();
+    _watchedPaths.clear();
 
-    _watchers.clear();
     super.dispose();
   }
 }
