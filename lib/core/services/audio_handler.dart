@@ -16,6 +16,13 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
 
   final PlaybackService _playback = PlaybackService.instance;
 
+  bool _isSeeking = false;
+  int _seekGeneration = 0;
+  List<MediaControl>? _lastControls;
+  List<int>? _lastCompactActionIndices;
+  String? _lastMediaItemKey;
+  String? _lastQueueKey;
+
   @override
   Future<void> play() => _playback.resume();
 
@@ -23,35 +30,94 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> pause() => _playback.pause();
 
   @override
-  Future<void> seek(Duration position) => _playback.seek(position);
+  Future<void> seek(Duration position) async {
+    final generation = ++_seekGeneration;
+    _isSeeking = true;
+    _publishPlaybackState(updateControls: false, updateQueue: false);
+
+    try {
+      await _playback.seek(position);
+    } finally {
+      if (generation == _seekGeneration) {
+        _isSeeking = false;
+        _publishPlaybackState();
+      }
+    }
+  }
 
   @override
-  Future<void> skipToNext() => _playback.playNext();
+  Future<void> skipToNext() {
+    if (!_playback.canPlayNext) return Future<void>.value();
+    return _playback.playNext();
+  }
 
   @override
-  Future<void> skipToPrevious() => _playback.playPrevious();
+  Future<void> skipToPrevious() {
+    if (!_playback.canPlayPrevious) return Future<void>.value();
+    return _playback.playPrevious();
+  }
 
   @override
   Future<void> stop() => _playback.stop();
 
-  void _publishPlaybackState() {
+  void _publishPlaybackState({
+    bool updateControls = true,
+    bool updateQueue = true,
+  }) {
+    // Android puede reconstruir la notificación al recibir cambios de
+    // controles/cola. Durante un seek solo actualizamos la posición.
+    if (_isSeeking) {
+      updateControls = false;
+      updateQueue = false;
+    }
+
     final song = _playback.currentSong;
     final songs = _playback.playingSongs;
 
-    if (song != null) {
-      mediaItem.add(_toMediaItem(song, _playback.duration));
+    if (updateQueue && !_isSeeking) {
+      final mediaItemKey = song == null
+          ? null
+          : '${song.filePath}|${_playback.duration.inMilliseconds}';
+
+      if (mediaItemKey != _lastMediaItemKey && song != null) {
+        mediaItem.add(_toMediaItem(song, _playback.duration));
+        _lastMediaItemKey = mediaItemKey;
+      }
+
+      final queueKey = songs
+          .map((item) => item.filePath ?? item.title)
+          .join('|');
+      if (queueKey != _lastQueueKey) {
+        queue.add(songs.map((item) => _toMediaItem(item)).toList());
+        _lastQueueKey = queueKey;
+      }
     }
 
-    // Se mantienen posiciones fijas para que androidCompactActionIndices
-    // siempre apunte a controles válidos, incluso en los extremos de la cola.
-    final controls = <MediaControl>[
-      MediaControl.skipToPrevious,
-      _playback.isPlaying ? MediaControl.pause : MediaControl.play,
-      MediaControl.skipToNext,
-      MediaControl.stop,
-    ];
+    if (updateControls) {
+      final controls = <MediaControl>[];
+      final compactActionIndices = <int>[];
 
-    queue.add(songs.map((item) => _toMediaItem(item)).toList());
+      if (_playback.canPlayPrevious) {
+        compactActionIndices.add(controls.length);
+        controls.add(MediaControl.skipToPrevious);
+      }
+
+      compactActionIndices.add(controls.length);
+      controls.add(
+        _playback.isPlaying ? MediaControl.pause : MediaControl.play,
+      );
+
+      if (_playback.canPlayNext) {
+        compactActionIndices.add(controls.length);
+        controls.add(MediaControl.skipToNext);
+      }
+
+      _lastControls = controls;
+      _lastCompactActionIndices = compactActionIndices;
+    }
+
+    final controls = _lastControls ?? const <MediaControl>[];
+    final compactActionIndices = _lastCompactActionIndices ?? const <int>[];
 
     final processingState = switch (_playback.processingState) {
       just_audio.ProcessingState.loading => AudioProcessingState.loading,
@@ -69,7 +135,7 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
           MediaAction.seekForward,
           MediaAction.seekBackward,
         },
-        androidCompactActionIndices: const [0, 1, 2],
+        androidCompactActionIndices: compactActionIndices,
         processingState: processingState,
         playing: _playback.isPlaying,
         updatePosition: _playback.position,
