@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:audio_service/audio_service.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -12,16 +13,33 @@ import 'core/services/library_scanner.dart';
 import 'core/services/settings_service.dart';
 import 'core/services/statistics_service.dart';
 import 'core/services/podcast_statistics_service.dart';
+import 'core/services/audio_handler.dart';
 import 'package:universal_youtube_player/universal_youtube_player.dart';
-import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 Future<void> main() async {
-  UniversalYoutubePlayerBootstrap.ensureInitialized();
-  JustAudioMediaKit.ensureInitialized();
   // Captura errores de la zona raíz para ver el stack trace real en consola.
   runZonedGuarded<Future<void>>(
     () async {
+      // Toda la inicialización y runApp deben compartir la misma zona.
       WidgetsFlutterBinding.ensureInitialized();
+      UniversalYoutubePlayerBootstrap.ensureInitialized();
+      JustAudioMediaKit.ensureInitialized();
+
+      await AudioService.init(
+        builder: DecibeXAudioHandler.new,
+        config: AudioServiceConfig(
+          androidNotificationChannelId: 'com.example.decibex.audio',
+          androidNotificationChannelName: 'Reproducción de audio',
+          androidNotificationChannelDescription:
+              'Controles de reproducción de DecibeX',
+          androidNotificationOngoing: true,
+          // Una notificación ongoing requiere que el servicio permanezca en
+          // foreground también cuando la reproducción está pausada.
+          androidStopForegroundOnPause: true,
+          artDownscaleWidth: 512,
+          artDownscaleHeight: 512,
+        ),
+      );
 
       FlutterError.onError = (details) {
         FlutterError.presentError(details);

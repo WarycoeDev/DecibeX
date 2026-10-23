@@ -151,6 +151,10 @@ class PlaybackService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get shuffleEnabled => _shuffleEnabled;
   LoopMode get repeatMode => _repeatMode;
+  ProcessingState get processingState => _player.processingState;
+  Duration get bufferedPosition => _player.bufferedPosition;
+  double get speed => _player.speed;
+  List<Song> get playingSongs => List.unmodifiable(_playingSongs);
 
   int? get currentIndex => _currentQueueIndex >= 0 ? _currentQueueIndex : null;
 
