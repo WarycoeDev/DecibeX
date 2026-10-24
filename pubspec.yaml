@@ -23,6 +23,7 @@ dependencies:
   youtube_explode_dart: ^3.1.0
   extractor: ^1.0.0
   universal_youtube_player: ^0.1.0
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:

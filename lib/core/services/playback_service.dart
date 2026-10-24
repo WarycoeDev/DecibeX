@@ -28,6 +28,12 @@ class PlaybackService extends ChangeNotifier {
         _seekStartedAt = null;
       }
 
+      // Si el player deja de reproducir, el "audio confirmado" ya no aplica
+      // hasta que vuelva a sonar.
+      if (!_isPlaying) {
+        _audioConfirmed = false;
+      }
+
       _syncFadeTimer();
       notifyListeners();
     });
@@ -58,10 +64,20 @@ class PlaybackService extends ChangeNotifier {
         }
       }
 
+      // Primer tick con posición real > 0: el audio ya está fluyendo de
+      // verdad. A partir de aquí el fade in puede calcular con posición
+      // fiable (antes, forzamos 0.0 absoluto).
+      if (value > Duration.zero) {
+        _audioConfirmed = true;
+      }
+
       _position = value;
 
       StatisticsService.instance.onPositionChanged(value);
       PodcastStatisticsService.instance.onPositionChanged(value);
+
+      // Empuja el timer si hacía falta (p. ej. audio confirmado tras play).
+      _syncFadeTimer();
 
       notifyListeners();
     });
@@ -86,6 +102,7 @@ class PlaybackService extends ChangeNotifier {
           _position = Duration.zero;
           _seekTarget = null;
           _seekStartedAt = null;
+          _audioConfirmed = false;
 
           StatisticsService.instance.onSongChanged(taggedSong);
           PodcastStatisticsService.instance.onSongChanged(taggedSong);
@@ -121,6 +138,12 @@ class PlaybackService extends ChangeNotifier {
   bool _shuffleEnabled = false;
   bool _completionHandled = false;
   bool _handlingCompletion = false;
+
+  /// `true` cuando el `positionStream` ha reportado una posición > 0
+  /// desde el último `play()`. Hasta entonces, el fade in se fuerza a 0.0
+  /// absoluto para tapar el jitter entre `play()` y el primer buffer
+  /// audible (evita escuchar un "tramito" a volumen pleno).
+  bool _audioConfirmed = false;
 
   int _currentQueueIndex = -1;
   int _shuffleCursor = -1;
@@ -334,6 +357,7 @@ class PlaybackService extends ChangeNotifier {
     _duration = Duration.zero;
     _seekTarget = null;
     _seekStartedAt = null;
+    _audioConfirmed = false;
 
     if (_shuffleEnabled) {
       _buildShuffleOrder();
@@ -427,6 +451,17 @@ class PlaybackService extends ChangeNotifier {
     final song = _currentSong;
     if (song == null) return;
 
+    // Mientras no haya confirmación de audio real (primer positionStream
+    // con posición > 0), forzamos silencio absoluto. Esto tapa el hueco
+    // entre play() y el primer buffer audible, donde el player reporta
+    // position = 0 pero el DAC ya puede estar sonando.
+    if (!_audioConfirmed && _isPlaying) {
+      if (_lastAppliedVolume != 0.0) {
+        await _setVolumeRaw(0.0);
+      }
+      return;
+    }
+
     final position = at ?? _player.position;
     final fadeGain = _currentFadeIndex()?.gainAt(position) ?? 1.0;
     final target = (_baseVolume(song) * fadeGain).clamp(0.0, 4.0).toDouble();
@@ -480,6 +515,7 @@ class PlaybackService extends ChangeNotifier {
     _duration = Duration.zero;
     _currentSong = song;
     _currentQueueIndex = _indexOfSong(_playingSongs, song);
+    _audioConfirmed = false;
 
     StatisticsService.instance.onSongChanged(song);
     PodcastStatisticsService.instance.onSongChanged(song);
@@ -500,9 +536,7 @@ class PlaybackService extends ChangeNotifier {
         ? PodcastStatisticsService.instance.resumePositionFor(song)
         : Duration.zero;
 
-    // Silencio absoluto ANTES de cargar la nueva fuente: si el reproductor
-    // sigue en "playing", empezaría a sonar en cuanto estuviera listo y se
-    // escaparía audio con el volumen de la pista anterior.
+    // Silencio absoluto ANTES de cargar la nueva fuente.
     await _setVolumeRaw(0.0);
 
     final loadedDuration = await _player.setAudioSource(
@@ -515,9 +549,20 @@ class PlaybackService extends ChangeNotifier {
       _duration = loadedDuration;
     }
 
-    // Volumen que toca en la posición inicial: 0.0 absoluto si hay fade in
-    // y se arranca en 0; el volumen base en caso contrario.
+    // Volumen que toca en la posición inicial. Con el nuevo FadeIndex, la
+    // posición 0 (o la inicial de un podcast reanudado) cae ya dentro del
+    // guard de silencio inicial, así que esto es 0.0 absoluto si hay fade
+    // in; si no hay fade in, es el volumen base.
     await _applyVolume(at: initialPosition, force: true);
+
+    // Aseguramos que el player está listo antes de arrancar: si está
+    // "loading", el primer buffer puede tardar y el volumen 0 ya está
+    // aplicado, así que esperar aquí es seguro y evita carreras.
+    if (_player.processingState == ProcessingState.loading) {
+      await _player.processingStateStream.firstWhere(
+        (s) => s != ProcessingState.loading,
+      );
+    }
 
     // El Future de play() solo se completa cuando la canción se pausa o
     // termina. Si se espera con await, _isLoading (y _handlingCompletion)
@@ -666,7 +711,12 @@ class PlaybackService extends ChangeNotifier {
       if (_player.processingState == ProcessingState.completed) {
         await _loadAndPlaySong(_currentSong!);
       } else {
-        // El volumen que toca en la posición actual (si se pausó a mitad de
+        // Al reanudar, el audio aún no está confirmado: forzamos 0.0 y
+        // dejamos que el primer positionStream > 0 reactive el fade.
+        _audioConfirmed = false;
+        await _setVolumeRaw(0.0);
+
+        // Volumen que toca en la posición actual (si se pausó a mitad de
         // un fade, continúa desde ahí).
         await _applyVolume(force: true);
 
@@ -880,6 +930,12 @@ class PlaybackService extends ChangeNotifier {
     StatisticsService.instance.onSeek(position);
     PodcastStatisticsService.instance.onSeek(position);
 
+    // Al hacer seek a una posición > 0, consideramos el audio confirmado
+    // (si ya estaba sonando). Si no estábamos reproduciendo, no aplica.
+    if (_isPlaying && position > Duration.zero) {
+      _audioConfirmed = true;
+    }
+
     // Volumen que toca en la posición de destino, aplicado ya (antes de que
     // el audio salte): al saltar dentro de un fade, suena en su nivel
     // correcto; al saltar fuera de uno, vuelve a volumen pleno.
@@ -901,6 +957,7 @@ class PlaybackService extends ChangeNotifier {
     _fadeIndex = null;
     _fadeIndexKey = null;
     _lastAppliedVolume = -1;
+    _audioConfirmed = false;
 
     await _player.stop();
 

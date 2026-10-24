@@ -8,7 +8,9 @@ import 'dart:typed_data';
 /// que toca en una posición cualquiera, así que funciona igual con
 /// reproducción normal, seek, pausa o reanudación.
 ///
-/// - Fade in:  ganancia 0.0 exacta en la posición 0 → 1.0 en `fadeInMs`.
+/// - Fade in:  ganancia 0.0 exacta en la posición 0, se mantiene en 0.0
+///   durante [startSilenceGuardMs] para absorber el jitter entre `play()`
+///   y el primer buffer audible, y llega a 1.0 en `fadeInMs`.
 /// - Fade out: 1.0 en `trackMs - fadeOutMs` → 0.0 exacta en
 ///   `trackMs - silenceGuardMs`, y 0.0 hasta el final de la pista.
 class FadeIndex {
@@ -16,9 +18,11 @@ class FadeIndex {
     required this.fadeInMs,
     required this.fadeOutMs,
     required this.trackMs,
+    required int startGuardMs,
     required Float32List inTable,
     required Float32List outTable,
-  }) : _inTable = inTable,
+  }) : _startGuardMs = startGuardMs,
+       _inTable = inTable,
        _outTable = outTable;
 
   /// Resolución del índice: 50 ms = 20 entradas por segundo.
@@ -28,10 +32,20 @@ class FadeIndex {
   /// último instante; con este margen el último tick siempre cae en 0).
   static const int silenceGuardMs = 120;
 
+  /// Margen inicial en silencio absoluto. Absorbe el desfase entre el
+  /// momento en que se llama a `play()` y el primer buffer que llega
+  /// realmente al dispositivo de audio (típicamente 100-300 ms en
+  /// Android/iOS). Sin esto se escucha un "tramito" a volumen pleno.
+  static const int startSilenceGuardMs = 220;
+
   /// Duraciones efectivas (ya limitadas a la mitad de la pista).
   final int fadeInMs;
   final int fadeOutMs;
   final int trackMs;
+
+  /// Guard inicial efectivo aplicado a esta pista (recortado si el fade
+  /// in es muy corto).
+  final int _startGuardMs;
 
   /// `_inTable[i]` = ganancia a `i * stepMs` ms desde el inicio.
   final Float32List _inTable;
@@ -56,24 +70,38 @@ class FadeIndex {
       outMs = math.min(outMs, half);
     }
 
+    // El guard inicial nunca puede consumir todo el fade in: si el fade in
+    // es más corto que el guard, el guard se recorta a 1/4 del fade in.
+    final startGuard = inMs > 0 ? math.min(startSilenceGuardMs, inMs ~/ 4) : 0;
+
     return FadeIndex._(
       fadeInMs: inMs,
       fadeOutMs: outMs,
       trackMs: trackMs,
-      inTable: _buildInTable(inMs),
+      startGuardMs: startGuard,
+      inTable: _buildInTable(inMs, startGuard),
       outTable: _buildOutTable(outMs),
     );
   }
 
-  static Float32List _buildInTable(int inMs) {
+  static Float32List _buildInTable(int inMs, int startGuard) {
     if (inMs <= 0) return Float32List(0);
 
     final n = (inMs / stepMs).ceil();
     final table = Float32List(n + 1);
 
+    // El fade in "útil" empieza después del guard inicial.
+    final span = inMs - startGuard;
+
     for (var i = 0; i <= n; i++) {
       final elapsed = math.min(i * stepMs, inMs);
-      table[i] = _curve(elapsed / inMs);
+      if (elapsed <= startGuard) {
+        table[i] = 0.0;
+      } else if (span <= 0) {
+        table[i] = 1.0;
+      } else {
+        table[i] = _curve((elapsed - startGuard) / span);
+      }
     }
 
     table[0] = 0.0; // silencio absoluto en el primer instante
@@ -139,7 +167,8 @@ class FadeIndex {
   /// Tabla legible "segundo → ganancia" para depurar.
   String debugDescribe() {
     final b = StringBuffer(
-      'FadeIndex(in=${fadeInMs}ms, out=${fadeOutMs}ms, pista=${trackMs}ms)\n',
+      'FadeIndex(in=${fadeInMs}ms, out=${fadeOutMs}ms, pista=${trackMs}ms, '
+      'startGuard=${_startGuardMs}ms)\n',
     );
 
     if (_inTable.isNotEmpty) {

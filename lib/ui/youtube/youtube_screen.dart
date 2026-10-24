@@ -5,6 +5,7 @@ import 'package:extractor/extractor.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../../core/services/library_scanner.dart';
 
@@ -19,6 +20,8 @@ class YouTubeScreen extends StatefulWidget {
 
 class _YouTubeScreenState extends State<YouTubeScreen>
     with SingleTickerProviderStateMixin {
+  static const _prefsDownloadDirKey = 'youtube_download_directory';
+
   final TextEditingController _searchController = TextEditingController();
   final YoutubeExplode _yt = YoutubeExplode();
   final YoutubeDLFlutter _downloader = YoutubeDLFlutter.instance;
@@ -518,28 +521,49 @@ class _YouTubeScreenState extends State<YouTubeScreen>
     );
   }
 
-  Future<void> _showDownloadMenu(Video video) async {
-    if (_isDownloading) return;
-
-    String directory = '';
+  /// Obtiene el directorio de descarga recordado en la sesión anterior.
+  Future<String> _resolveInitialDirectory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_prefsDownloadDirKey);
+      if (saved != null && saved.isNotEmpty) {
+        return saved;
+      }
+    } catch (_) {}
 
     try {
       final downloads = await getDownloadsDirectory();
       final fallback = await getExternalStorageDirectory();
-      directory = (downloads ?? fallback)?.path ?? '';
+      return (downloads ?? fallback)?.path ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Guarda el directorio para reutilizarlo la próxima vez.
+  Future<void> _persistDirectory(String directory) async {
+    if (directory.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsDownloadDirKey, directory);
     } catch (_) {}
+  }
+
+  Future<void> _showDownloadMenu(Video video) async {
+    if (_isDownloading) return;
+
+    final directory = await _resolveInitialDirectory();
 
     if (!mounted) return;
 
     setState(() => _isDownloading = true);
 
     try {
-      final request = await showModalBottomSheet<_DownloadRequest>(
+      final request = await showDialog<_DownloadRequest>(
         context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (sheetContext) {
-          return _DownloadSheetContent(
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return _DownloadConfigDialog(
             video: video,
             initialDirectory: directory,
             onError: _message,
@@ -548,6 +572,9 @@ class _YouTubeScreenState extends State<YouTubeScreen>
       );
 
       if (request == null || !mounted) return;
+
+      // Persistimos el directorio elegido para la próxima vez.
+      await _persistDirectory(request.directory);
 
       await showDialog<void>(
         context: context,
@@ -591,7 +618,7 @@ class _YouTubeScreenState extends State<YouTubeScreen>
   }
 }
 
-/// Datos que se pasan del menú de descarga al diálogo de progreso.
+/// Datos que se pasan del diálogo de configuración al diálogo de progreso.
 class _DownloadRequest {
   final AudioFormat format;
   final String fileName;
@@ -606,24 +633,27 @@ class _DownloadRequest {
   });
 }
 
-/// Contenido del bottom sheet de configuración de descarga.
-class _DownloadSheetContent extends StatefulWidget {
+/// Diálogo centrado de configuración de descarga.
+class _DownloadConfigDialog extends StatefulWidget {
   final Video video;
   final String initialDirectory;
   final void Function(String message) onError;
 
-  const _DownloadSheetContent({
+  const _DownloadConfigDialog({
     required this.video,
     required this.initialDirectory,
     required this.onError,
   });
 
   @override
-  State<_DownloadSheetContent> createState() => _DownloadSheetContentState();
+  State<_DownloadConfigDialog> createState() => _DownloadConfigDialogState();
 }
 
-class _DownloadSheetContentState extends State<_DownloadSheetContent> {
+class _DownloadConfigDialogState extends State<_DownloadConfigDialog> {
   late final TextEditingController _nameController;
+  final FocusNode _nameFocusNode = FocusNode();
+  final GlobalKey _nameFieldKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
   late String _directory;
   AudioFormat? _selectedFormat;
 
@@ -634,11 +664,35 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
       text: _sanitizeFileName(widget.video.title),
     );
     _directory = widget.initialDirectory;
+
+    // Al ganar foco el campo de nombre, hacemos scroll para que quede visible
+    // por encima del teclado. Esperamos dos frames: uno para que el teclado
+    // se abra y otro para que el layout se reacomode antes de scrollear.
+    _nameFocusNode.addListener(() {
+      if (_nameFocusNode.hasFocus) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final ctx = _nameFieldKey.currentContext;
+            if (ctx != null) {
+              Scrollable.ensureVisible(
+                ctx,
+                duration: const Duration(milliseconds: 250),
+                alignment: 0.1,
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _nameFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -789,59 +843,61 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mediaQuery = MediaQuery.of(context);
+
+    // Altura útil real: pantalla menos safe areas menos insetPadding del
+    // Dialog (24 arriba + 24 abajo). NO restamos viewInsets aquí porque el
+    // Dialog + MediaQuery ya lo gestionan automáticamente al abrir el teclado.
+    final availableHeight =
+        mediaQuery.size.height -
+        mediaQuery.padding.top -
+        mediaQuery.padding.bottom -
+        48; // insetPadding vertical (24 * 2)
 
     final canDownload =
         _selectedFormat != null &&
         _nameController.text.trim().isNotEmpty &&
         _directory.isNotEmpty;
 
-    return SafeArea(
-      top: false,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 480,
+          maxHeight: availableHeight > 0 ? availableHeight : 100,
         ),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.88,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle superior
-              Padding(
-                padding: const EdgeInsets.only(top: 14),
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
               ),
-              const SizedBox(height: 18),
-
-              // Cabecera con thumbnail rectangular (16:9) + título
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
+            ],
+          ),
+          // Toda la columna (incluidos los botones) va dentro del scroll.
+          // Así, si el teclado deja muy poco espacio, se puede hacer scroll
+          // hasta los botones en lugar de desbordar.
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Cabecera con thumbnail + título
+                Row(
                   children: [
                     Stack(
                       clipBehavior: Clip.none,
                       children: [
                         Container(
-                          // Proporción 16:9 para que la carátula se vea completa.
                           width: 128,
                           height: 72,
                           decoration: BoxDecoration(
@@ -931,89 +987,81 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 18),
+                const SizedBox(height: 16),
 
-              // Contenido scrollable
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Directorio de guardado',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _optionTile(
-                        icon: Icons.folder_outlined,
-                        title: _directory.isEmpty
-                            ? 'Elegir carpeta'
-                            : _directory,
-                        subtitle: 'Seleccionar ubicación',
-                        showCheck: false,
-                        onTap: () async {
-                          final picked = await FilePicker.getDirectoryPath(
-                            dialogTitle: 'Elegir carpeta de descarga',
-                            initialDirectory: _directory.isEmpty
-                                ? null
-                                : _directory,
-                          );
-
-                          if (picked != null) {
-                            setState(() => _directory = picked);
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Nombre del archivo',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _nameController,
-                        onChanged: (_) => setState(() {}),
-                        decoration: _inputDecoration(
-                          'Nombre sin extensión',
-                          Icons.drive_file_rename_outline_rounded,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Formato de descarga',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (final format in AudioFormat.values)
-                        _optionTile(
-                          icon: format.icon,
-                          title: format.label,
-                          subtitle: format.subtitle,
-                          selected: _selectedFormat == format,
-                          onTap: () {
-                            setState(() => _selectedFormat = format);
-                          },
-                        ),
-                    ],
+                // Directorio
+                Text(
+                  'Directorio de guardado',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                _optionTile(
+                  icon: Icons.folder_outlined,
+                  title: _directory.isEmpty ? 'Elegir carpeta' : _directory,
+                  subtitle: 'Seleccionar ubicación',
+                  showCheck: false,
+                  onTap: () async {
+                    final picked = await FilePicker.getDirectoryPath(
+                      dialogTitle: 'Elegir carpeta de descarga',
+                      initialDirectory: _directory.isEmpty ? null : _directory,
+                    );
 
-              // Botones cuadrados estilo playlist
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                child: Row(
+                    if (picked != null) {
+                      setState(() => _directory = picked);
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // Nombre del archivo
+                Text(
+                  'Nombre del archivo',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: _nameFieldKey,
+                  focusNode: _nameFocusNode,
+                  controller: _nameController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: _inputDecoration(
+                    'Nombre sin extensión',
+                    Icons.drive_file_rename_outline_rounded,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Formatos
+                Text(
+                  'Formato de descarga',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final format in AudioFormat.values)
+                  _optionTile(
+                    icon: format.icon,
+                    title: format.label,
+                    subtitle: format.subtitle,
+                    selected: _selectedFormat == format,
+                    onTap: () {
+                      setState(() => _selectedFormat = format);
+                    },
+                  ),
+
+                const SizedBox(height: 16),
+
+                // Botones (dentro del scroll para que siempre sean
+                // alcanzables aunque el teclado ocupe casi todo).
+                Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
@@ -1051,8 +1099,8 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
                     ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1061,7 +1109,7 @@ class _DownloadSheetContentState extends State<_DownloadSheetContent> {
 }
 
 /// Diálogo de descarga: progreso, completado y error en un solo widget
-/// con la misma estética que el bottom sheet de configuración.
+/// con la misma estética que el diálogo de configuración.
 class _DownloadProgressDialog extends StatefulWidget {
   final Video video;
   final _DownloadRequest request;
@@ -1263,71 +1311,67 @@ class _DownloadProgressDialogState extends State<_DownloadProgressDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+
     return PopScope(
       canPop: !_isBusy,
-      child: Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 440),
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
+      child: AnimatedPadding(
+        // Empuja el diálogo hacia arriba cuando aparece el teclado.
+        padding: EdgeInsets.only(bottom: viewInsets.bottom),
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+              maxWidth: 440,
+              maxHeight: MediaQuery.sizeOf(context).height * 0.85,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Handle superior
-                Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(2),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Cabecera con thumbnail rectangular 16:9 + badge de estado
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _buildHeader(context),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Cuerpo variable según la fase
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        child: _buildBody(context),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 18),
 
-                // Cabecera con thumbnail rectangular 16:9 + badge de estado
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: _buildHeader(context),
-                ),
-                const SizedBox(height: 18),
-
-                // Cuerpo variable según la fase
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
-                      child: _buildBody(context),
-                    ),
+                  // Botones al pie
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                    child: _buildFooter(context),
                   ),
-                ),
-
-                // Botones al pie
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                  child: _buildFooter(context),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
