@@ -2073,33 +2073,33 @@ class _LanguageTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 5),
       leading: Icon(Icons.language_rounded, color: AppTheme.accent),
-      title: Text(context.l10n.language),
-      subtitle: Text(_label(context, value)),
-      trailing: DropdownButton<AppLanguage>(
-        value: value,
-        underline: const SizedBox.shrink(),
-        onChanged: (value) {
-          if (value == null) return;
-          onChanged(value);
-        },
-        items: [
-          DropdownMenuItem(
-            value: AppLanguage.system,
-            child: Text(context.l10n.systemLanguage),
-          ),
-          DropdownMenuItem(
-            value: AppLanguage.spanish,
-            child: Text(context.l10n.spanish),
-          ),
-          DropdownMenuItem(
-            value: AppLanguage.english,
-            child: Text(context.l10n.english),
-          ),
-        ],
+      title: Text(
+        context.l10n.language,
+        style: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
       ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          _label(context, value),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: AppTheme.textSecondary,
+            height: 1.4,
+          ),
+        ),
+      ),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        size: 20,
+        color: AppTheme.textSecondary,
+      ),
+      onTap: () => _showLanguageSheet(context),
     );
   }
 
@@ -2112,6 +2112,149 @@ class _LanguageTile extends StatelessWidget {
       case AppLanguage.english:
         return context.l10n.english;
     }
+  }
+
+  void _showLanguageSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final l10n = sheetContext.l10n;
+
+        return SafeArea(
+          top: false,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceVariant,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: AppTheme.accent.withValues(alpha: 0.13),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(
+                          Icons.language_rounded,
+                          color: AppTheme.accent,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.language,
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              l10n.systemLanguage,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close_rounded),
+                        tooltip: l10n.close,
+                        color: AppTheme.textSecondary,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Divider(
+                  height: 1,
+                  thickness: 0.7,
+                  color: AppTheme.surfaceVariant,
+                ),
+                _LanguageOptionTile(
+                  icon: Icons.settings_suggest_rounded,
+                  title: l10n.systemLanguage,
+                  selected: value == AppLanguage.system,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    onChanged(AppLanguage.system);
+                  },
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 0.7,
+                  color: AppTheme.surfaceVariant,
+                ),
+                _LanguageOptionTile(
+                  icon: Icons.translate_rounded,
+                  title: l10n.spanish,
+                  nativeLabel: 'Español',
+                  selected: value == AppLanguage.spanish,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    onChanged(AppLanguage.spanish);
+                  },
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 0.7,
+                  color: AppTheme.surfaceVariant,
+                ),
+                _LanguageOptionTile(
+                  icon: Icons.translate_rounded,
+                  title: l10n.english,
+                  nativeLabel: 'English',
+                  selected: value == AppLanguage.english,
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    onChanged(AppLanguage.english);
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -2336,6 +2479,72 @@ class _SettingSlider extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _LanguageOptionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? nativeLabel;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _LanguageOptionTile({
+    required this.icon,
+    required this.title,
+    this.nativeLabel,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ListTile(
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accent.withValues(alpha: 0.13)
+              : AppTheme.surfaceVariant.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: selected ? AppTheme.accent : AppTheme.textSecondary,
+        ),
+      ),
+      title: Text(
+        title,
+        style: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+          color: selected ? AppTheme.accent : null,
+        ),
+      ),
+      subtitle: nativeLabel != null
+          ? Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                nativeLabel!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            )
+          : null,
+      trailing: selected
+          ? Icon(Icons.check_circle_rounded, color: AppTheme.accent, size: 22)
+          : Icon(
+              Icons.radio_button_unchecked_rounded,
+              color: AppTheme.surfaceVariant,
+              size: 22,
+            ),
     );
   }
 }
