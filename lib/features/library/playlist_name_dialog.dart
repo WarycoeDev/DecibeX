@@ -1,3 +1,4 @@
+import 'package:decibex/l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
 
 import '../../ui/app_theme.dart';
@@ -125,7 +126,7 @@ class PlaylistNameDialogState extends State<PlaylistNameDialog> {
                   IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Cerrar',
+                    tooltip: context.l10n.close,
                   ),
                 ],
               ),
@@ -154,7 +155,7 @@ class PlaylistNameDialogState extends State<PlaylistNameDialog> {
                         children: [
                           Expanded(
                             child: Text(
-                              'Nombre de la playlist',
+                              context.l10n.playlistName,
                               style: theme.textTheme.titleSmall?.copyWith(
                                 color: AppTheme.textSecondary,
                               ),
@@ -196,7 +197,7 @@ class PlaylistNameDialogState extends State<PlaylistNameDialog> {
                         ),
                         cursorColor: AppTheme.accent,
                         decoration: InputDecoration(
-                          hintText: 'Escribe un nombre',
+                          hintText: context.l10n.typePlaylistName,
                           counterText: '',
                           filled: true,
                           fillColor: AppTheme.surface,
@@ -207,7 +208,7 @@ class PlaylistNameDialogState extends State<PlaylistNameDialog> {
                           suffixIcon: value.text.isEmpty
                               ? null
                               : IconButton(
-                                  tooltip: 'Borrar',
+                                  tooltip: context.l10n.clear,
                                   icon: const Icon(
                                     Icons.close_rounded,
                                     size: 20,
@@ -259,7 +260,7 @@ class PlaylistNameDialogState extends State<PlaylistNameDialog> {
                     style: TextButton.styleFrom(
                       foregroundColor: AppTheme.textSecondary,
                     ),
-                    child: const Text('Cancelar'),
+                    child: Text(context.l10n.cancel),
                   ),
                   const SizedBox(width: 8),
                   ValueListenableBuilder<TextEditingValue>(

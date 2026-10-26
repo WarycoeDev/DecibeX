@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../core/models/song.dart';
 import '../../core/models/playlist.dart';
 import '../../core/services/playback_queue.dart';
@@ -104,6 +105,8 @@ class SongListTile extends StatelessWidget {
 
     if (!context.mounted) return;
 
+    final l10n = context.l10n;
+
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppTheme.surfaceVariant,
@@ -127,7 +130,7 @@ class SongListTile extends StatelessWidget {
                 ),
                 ListTile(
                   leading: const Icon(Icons.playlist_remove_rounded),
-                  title: const Text('Sobrescribir cola'),
+                  title: Text(l10n.overwriteQueue),
                   onTap: () => Navigator.pop(sheetContext, 'replace'),
                 ),
                 ListTile(
@@ -137,14 +140,14 @@ class SongListTile extends StatelessWidget {
                         : Icons.playlist_add_rounded,
                   ),
                   title: Text(
-                    alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
+                    alreadyQueued ? l10n.removeFromQueue : l10n.addToQueue,
                   ),
                   onTap: () => Navigator.pop(sheetContext, 'toggle'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.library_music_rounded),
                   title: Text(
-                    hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
+                    hasPlaylists ? l10n.addPlaylist : l10n.createPlaylist,
                   ),
                   onTap: () => Navigator.pop(
                     sheetContext,
@@ -153,7 +156,7 @@ class SongListTile extends StatelessWidget {
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
+                  title: Text(l10n.cancel),
                   onTap: () => Navigator.pop(sheetContext, 'cancel'),
                 ),
               ],
@@ -196,6 +199,8 @@ class SongListTile extends StatelessWidget {
     final hasPlaylists = playlistService.playlists.isNotEmpty;
 
     if (!context.mounted) return;
+
+    final l10n = context.l10n;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -243,7 +248,7 @@ class SongListTile extends StatelessWidget {
                 if (!queueIsEmpty)
                   ListTile(
                     leading: const Icon(Icons.playlist_remove_rounded),
-                    title: const Text('Sobrescribir cola'),
+                    title: Text(l10n.overwriteQueue),
                     onTap: () => Navigator.pop(sheetContext, 'replace'),
                   ),
                 ListTile(
@@ -253,14 +258,14 @@ class SongListTile extends StatelessWidget {
                         : Icons.playlist_add_rounded,
                   ),
                   title: Text(
-                    alreadyQueued ? 'Quitar de la cola' : 'Añadir a la cola',
+                    alreadyQueued ? l10n.removeFromQueue : l10n.addToQueue,
                   ),
                   onTap: () => Navigator.pop(sheetContext, 'toggle'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.library_music_rounded),
                   title: Text(
-                    hasPlaylists ? 'Añadir a playlist' : 'Crear playlist',
+                    hasPlaylists ? l10n.addPlaylist : l10n.createPlaylist,
                   ),
                   onTap: () => Navigator.pop(
                     sheetContext,
@@ -277,14 +282,14 @@ class SongListTile extends StatelessWidget {
                     ),
                     title: Text(
                       song.favorite
-                          ? 'Quitar de favoritos'
-                          : 'Agregar a favoritos',
+                          ? l10n.removeFromFavorites
+                          : l10n.addToFavorites,
                     ),
                     onTap: () => Navigator.pop(sheetContext, 'favorite'),
                   ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
+                  title: Text(l10n.cancel),
                   onTap: () => Navigator.pop(sheetContext, 'cancel'),
                 ),
               ],
@@ -321,14 +326,15 @@ class SongListTile extends StatelessWidget {
     Song song,
   ) async {
     final service = PlaylistService.instance;
+    final l10n = context.l10n;
 
     final name = await showDialog<String>(
       context: context,
-      builder: (_) => const PlaylistNameDialog(
+      builder: (_) => PlaylistNameDialog(
         icon: Icons.queue_music_rounded,
-        title: 'Nueva playlist',
-        subtitle: 'Ponle un nombre para empezar a organizar tu música.',
-        confirmLabel: 'Crear',
+        title: l10n.newPlaylist,
+        subtitle: l10n.newPlaylistSubtitle,
+        confirmLabel: l10n.create,
       ),
     );
 
@@ -394,6 +400,7 @@ class SongListTile extends StatelessWidget {
       if (playlists.isEmpty) return;
 
       final songPath = song.filePath!;
+      final l10n = context.l10n;
 
       final initiallyContaining = <String>{
         for (final playlist in playlists)
@@ -503,7 +510,7 @@ class SongListTile extends StatelessWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'Añadir a playlist',
+                                      l10n.addPlaylist,
                                       style: theme.textTheme.titleLarge
                                           ?.copyWith(
                                             fontWeight: FontWeight.bold,
@@ -536,7 +543,7 @@ class SongListTile extends StatelessWidget {
                               IconButton(
                                 onPressed: () => Navigator.pop(sheetContext),
                                 icon: const Icon(Icons.close_rounded),
-                                tooltip: 'Cerrar',
+                                tooltip: l10n.close,
                                 visualDensity: VisualDensity.compact,
                                 color: AppTheme.textSecondary,
                               ),
@@ -550,7 +557,7 @@ class SongListTile extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: Text(
-                                  'Listas de reproducción',
+                                  l10n.playlistsSection,
                                   style: theme.textTheme.titleSmall?.copyWith(
                                     color: AppTheme.textSecondary,
                                     fontWeight: FontWeight.w600,
@@ -570,7 +577,7 @@ class SongListTile extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(50),
                                 ),
                                 child: Text(
-                                  '${selectedIds.length} seleccionadas',
+                                  l10n.nSelected(selectedIds.length),
                                   style: theme.textTheme.labelMedium?.copyWith(
                                     color: selectedIds.isEmpty
                                         ? AppTheme.textSecondary
@@ -657,7 +664,9 @@ class SongListTile extends StatelessWidget {
                                                 ),
                                                 const SizedBox(height: 2),
                                                 Text(
-                                                  '${playlist.songPaths.length} canciones',
+                                                  l10n.nSongs(
+                                                    playlist.songPaths.length,
+                                                  ),
                                                   style: theme
                                                       .textTheme
                                                       .bodySmall
@@ -726,7 +735,7 @@ class SongListTile extends StatelessWidget {
                                       borderRadius: BorderRadius.circular(14),
                                     ),
                                   ),
-                                  child: const Text('Cancelar'),
+                                  child: Text(l10n.cancel),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -763,7 +772,7 @@ class SongListTile extends StatelessWidget {
                                     Icons.check_rounded,
                                     size: 18,
                                   ),
-                                  label: const Text('Guardar'),
+                                  label: Text(l10n.save),
                                 ),
                               ),
                             ],
@@ -867,7 +876,7 @@ class SongListTile extends StatelessWidget {
               ),
               IconButton(
                 onPressed: () => _showContextMenu(context),
-                tooltip: 'Más opciones',
+                tooltip: context.l10n.moreOptions,
                 icon: const Icon(Icons.more_horiz_rounded),
                 color: AppTheme.textSecondary,
                 iconSize: 22,

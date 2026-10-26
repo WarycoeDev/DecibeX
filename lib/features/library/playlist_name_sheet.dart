@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:decibex/l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
 
 import '../../ui/app_theme.dart';
@@ -229,7 +230,7 @@ class _PlaylistNameSheetState extends State<PlaylistNameSheet> {
                   maxLength: 60,
                   style: theme.textTheme.bodyLarge,
                   decoration: InputDecoration(
-                    hintText: 'Nombre de la playlist',
+                    hintText: context.l10n.playlistName,
                     hintStyle: TextStyle(color: AppTheme.textSecondary),
                     counterText: '',
                     filled: true,
@@ -281,7 +282,7 @@ class _PlaylistNameSheetState extends State<PlaylistNameSheet> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        child: const Text('Cancelar'),
+                        child: Text(context.l10n.cancel),
                       ),
                     ),
                     const SizedBox(width: 12),

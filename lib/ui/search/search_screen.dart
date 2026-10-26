@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_scanner.dart';
 import '../../core/services/playback_queue.dart';
@@ -46,23 +47,31 @@ class _SearchScreenState extends State<SearchScreen>
   static const int _maxAnimatedItems = 16;
 
   static const List<_SearchFilterData> _filters = [
-    _SearchFilterData(_SearchFilter.all, 'Todo', Icons.search_rounded),
+    _SearchFilterData(_SearchFilter.all, 'filterAll', Icons.search_rounded),
     _SearchFilterData(
       _SearchFilter.songs,
-      'Canciones',
+      'filterSongs',
       Icons.music_note_rounded,
     ),
-    _SearchFilterData(_SearchFilter.artists, 'Artistas', Icons.person_rounded),
-    _SearchFilterData(_SearchFilter.albums, 'Álbumes', Icons.album_rounded),
+    _SearchFilterData(
+      _SearchFilter.artists,
+      'filterArtists',
+      Icons.person_rounded,
+    ),
+    _SearchFilterData(
+      _SearchFilter.albums,
+      'filterAlbums',
+      Icons.album_rounded,
+    ),
     _SearchFilterData(
       _SearchFilter.podcasts,
-      'Podcasts',
+      'filterPodcasts',
       Icons.podcasts_rounded,
     ),
     // [NUEVO] Filtro de YouTube integrado.
     _SearchFilterData(
       _SearchFilter.youtube,
-      'YouTube',
+      'filterYoutube',
       Icons.play_circle_outline_rounded,
     ),
   ];
@@ -143,9 +152,6 @@ class _SearchScreenState extends State<SearchScreen>
         normalized == 'unknown' ||
         normalized == 'unknown album';
   }
-
-  String _normalize(String value) =>
-      value.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 
   // ---------------------------------------------------------------
   // Búsqueda difusa (biblioteca local)
@@ -302,12 +308,12 @@ class _SearchScreenState extends State<SearchScreen>
               children: [
                 ListTile(
                   leading: const Icon(Icons.playlist_remove_rounded),
-                  title: const Text('Sobrescribir cola'),
+                  title: Text(context.l10n.overwriteQueue),
                   onTap: () => Navigator.pop(sheetContext, true),
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
+                  title: Text(context.l10n.cancel),
                   onTap: () => Navigator.pop(sheetContext, false),
                 ),
               ],
@@ -371,8 +377,8 @@ class _SearchScreenState extends State<SearchScreen>
 
     for (final song in source) {
       final title = isArtist
-          ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
-          : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
+          ? (song.artist.isEmpty ? context.l10n.unknown : song.artist)
+          : (_isUnknownAlbum(song.album) ? context.l10n.unknown : song.album);
 
       final normTitle = _normalizeFuzzy(title);
       double score = 0;
@@ -452,7 +458,7 @@ class _SearchScreenState extends State<SearchScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() => _ytLoading = false);
-      _message('Error al buscar en YouTube: $error');
+      _message(context.l10n.searchYoutubeErrorDetail(error));
     }
   }
 
@@ -466,7 +472,7 @@ class _SearchScreenState extends State<SearchScreen>
       if (!mounted) return;
 
       if (nextPage == null) {
-        _message('No hay más resultados.');
+        _message(context.l10n.searchYoutubeNoMoreResults);
         setState(() => _ytLoadingMore = false);
         return;
       }
@@ -480,7 +486,7 @@ class _SearchScreenState extends State<SearchScreen>
     } catch (error) {
       if (!mounted) return;
       setState(() => _ytLoadingMore = false);
-      _message('Error al cargar más: $error');
+      _message(context.l10n.searchYoutubeLoadMoreError(error));
     }
   }
 
@@ -593,7 +599,6 @@ class _SearchScreenState extends State<SearchScreen>
 
     // Si estamos en modo YouTube, la búsqueda es online (submit).
     if (_selectedFilter == _SearchFilter.youtube) {
-      // Limpiamos resultados anteriores para evitar mezclar búsquedas.
       if (value.isEmpty) {
         _ytClear();
       }
@@ -651,7 +656,7 @@ class _SearchScreenState extends State<SearchScreen>
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Abrir detalle de "$title"'),
+        content: Text(context.l10n.openDetailOfTitle(title)),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -757,7 +762,9 @@ class _SearchScreenState extends State<SearchScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          isYouTubeMode ? 'BUSCAR EN YOUTUBE' : 'ENCUENTRA TU MÚSICA',
+          isYouTubeMode
+              ? context.l10n.searchYoutubeMode
+              : context.l10n.findYourMusic,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
@@ -768,7 +775,9 @@ class _SearchScreenState extends State<SearchScreen>
         ),
         SizedBox(height: isCompact ? 8 : 10),
         Text(
-          isYouTubeMode ? 'Explora y descarga' : 'Buscar',
+          isYouTubeMode
+              ? context.l10n.exploreAndDownload
+              : context.l10n.searchTitle,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style:
@@ -784,8 +793,8 @@ class _SearchScreenState extends State<SearchScreen>
         SizedBox(height: isCompact ? 6 : 8),
         Text(
           isYouTubeMode
-              ? 'Busca videos o audio de YouTube y elige el formato de descarga.'
-              : 'Explora toda tu colección por canción, artista, álbum o podcast.',
+              ? context.l10n.searchYoutubeDescription
+              : context.l10n.searchLibraryDescription,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -817,8 +826,8 @@ class _SearchScreenState extends State<SearchScreen>
           cursorColor: AppTheme.accent,
           decoration: InputDecoration(
             hintText: isYouTubeMode
-                ? 'Buscar en YouTube...'
-                : 'Canciones, artistas, álbumes o podcasts',
+                ? context.l10n.searchYoutubeHint
+                : context.l10n.searchLibraryHint,
             hintStyle: theme.textTheme.bodyLarge?.copyWith(
               color: AppTheme.textSecondary,
             ),
@@ -830,13 +839,13 @@ class _SearchScreenState extends State<SearchScreen>
             ),
             suffixIcon: hasQuery
                 ? IconButton(
-                    tooltip: 'Borrar',
+                    tooltip: context.l10n.clear,
                     icon: const Icon(Icons.close_rounded, size: 20),
                     onPressed: _clearQuery,
                   )
                 : (isYouTubeMode
                       ? IconButton(
-                          tooltip: 'Buscar en YouTube',
+                          tooltip: context.l10n.searchYoutube,
                           icon: const Icon(
                             Icons.arrow_forward_rounded,
                             size: 20,
@@ -919,7 +928,6 @@ class _SearchScreenState extends State<SearchScreen>
   // ---------------------------------------------------------------
 
   Widget _buildYouTubeResults(_LayoutSize layout) {
-    final isCompact = layout == _LayoutSize.compact;
     final isDesktop = layout == _LayoutSize.expanded;
 
     if (_ytLoading) {
@@ -940,10 +948,12 @@ class _SearchScreenState extends State<SearchScreen>
             icon: hasQuery
                 ? Icons.search_off_rounded
                 : Icons.play_circle_outline_rounded,
-            title: hasQuery ? 'Sin resultados' : 'Buscar en YouTube',
+            title: hasQuery
+                ? context.l10n.searchNoResultsTitle
+                : context.l10n.searchOnYoutubeTitle,
             message: hasQuery
-                ? 'Prueba con otras palabras.'
-                : 'Escribe algo y pulsa Enter para buscar videos o audio en YouTube.',
+                ? context.l10n.searchTryOtherWords
+                : context.l10n.searchOnYoutubeMessage,
           ),
           layout,
         ),
@@ -977,7 +987,9 @@ class _SearchScreenState extends State<SearchScreen>
                           )
                         : const Icon(Icons.expand_more_rounded),
                     label: Text(
-                      _ytLoadingMore ? 'Cargando…' : 'Buscar más resultados',
+                      _ytLoadingMore
+                          ? context.l10n.searchLoadingMore
+                          : context.l10n.searchLoadMore,
                     ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppTheme.accent,
@@ -1073,7 +1085,7 @@ class _SearchScreenState extends State<SearchScreen>
                                     : () => _ytShowDownloadMenu(video),
                                 icon: const Icon(Icons.more_horiz_rounded),
                                 color: AppTheme.textSecondary,
-                                tooltip: 'Descargar',
+                                tooltip: context.l10n.download,
                               ),
                             ],
                           ),
@@ -1110,11 +1122,10 @@ class _SearchScreenState extends State<SearchScreen>
       return SliverToBoxAdapter(
         child: _entry(
           0,
-          const _EmptySearchState(
+          _EmptySearchState(
             icon: Icons.search_rounded,
-            title: 'Empieza a escribir',
-            message:
-                'Busca por título, artista, álbum o podcast en toda tu biblioteca.',
+            title: context.l10n.searchStartTypingTitle,
+            message: context.l10n.searchStartTypingMessage,
           ),
           layout,
         ),
@@ -1131,8 +1142,8 @@ class _SearchScreenState extends State<SearchScreen>
           songs,
           isDesktop,
           layout,
-          emptyTitle: 'Sin canciones',
-          emptyMessage: 'Ninguna canción coincide con "$_query".',
+          emptyTitle: context.l10n.searchNoSongsTitle,
+          emptyMessage: context.l10n.searchNoSongsMessage(_query),
         );
 
       case _SearchFilter.artists:
@@ -1142,8 +1153,8 @@ class _SearchScreenState extends State<SearchScreen>
           isDesktop,
           layout,
           isArtist: true,
-          emptyTitle: 'Sin artistas',
-          emptyMessage: 'Ningún artista coincide con "$_query".',
+          emptyTitle: context.l10n.searchNoArtistsTitle,
+          emptyMessage: context.l10n.searchNoArtistsMessage(_query),
         );
 
       case _SearchFilter.albums:
@@ -1153,8 +1164,8 @@ class _SearchScreenState extends State<SearchScreen>
           isDesktop,
           layout,
           isArtist: false,
-          emptyTitle: 'Sin álbumes',
-          emptyMessage: 'Ningún álbum coincide con "$_query".',
+          emptyTitle: context.l10n.searchNoAlbumsTitle,
+          emptyMessage: context.l10n.searchNoAlbumsMessage(_query),
         );
 
       case _SearchFilter.podcasts:
@@ -1165,8 +1176,8 @@ class _SearchScreenState extends State<SearchScreen>
           layout,
           isArtist: false,
           isPodcast: true,
-          emptyTitle: 'Sin podcasts',
-          emptyMessage: 'Ningún podcast coincide con "$_query".',
+          emptyTitle: context.l10n.searchNoPodcastsTitle,
+          emptyMessage: context.l10n.searchNoPodcastsMessage(_query),
         );
 
       case _SearchFilter.youtube:
@@ -1193,8 +1204,8 @@ class _SearchScreenState extends State<SearchScreen>
           0,
           _EmptySearchState(
             icon: Icons.search_off_rounded,
-            title: 'Sin resultados',
-            message: 'No encontramos nada que coincida con "$_query".',
+            title: context.l10n.searchNoResultsTitle,
+            message: context.l10n.searchNoResultsMessage(_query),
           ),
           layout,
         ),
@@ -1204,7 +1215,7 @@ class _SearchScreenState extends State<SearchScreen>
     final slivers = <Widget>[];
 
     if (songs.isNotEmpty) {
-      slivers.add(_sectionHeader('Canciones', songs.length, 0));
+      slivers.add(_sectionHeader(context.l10n.filterSongs, songs.length, 0));
       slivers.add(
         _songListSliver(
           songs.take(limit).toList(),
@@ -1216,7 +1227,9 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     if (artists.isNotEmpty) {
-      slivers.add(_sectionHeader('Artistas', artists.length, 1));
+      slivers.add(
+        _sectionHeader(context.l10n.filterArtists, artists.length, 1),
+      );
       slivers.add(
         _collectionSliver(
           artists.take(limit).toList(),
@@ -1229,7 +1242,7 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     if (albums.isNotEmpty) {
-      slivers.add(_sectionHeader('Álbumes', albums.length, 2));
+      slivers.add(_sectionHeader(context.l10n.filterAlbums, albums.length, 2));
       slivers.add(
         _collectionSliver(
           albums.take(limit).toList(),
@@ -1242,7 +1255,9 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     if (podcasts.isNotEmpty) {
-      slivers.add(_sectionHeader('Podcasts', podcasts.length, 3));
+      slivers.add(
+        _sectionHeader(context.l10n.filterPodcasts, podcasts.length, 3),
+      );
       slivers.add(
         _collectionSliver(
           podcasts.take(limit).toList(),
@@ -1399,8 +1414,10 @@ class _SearchScreenState extends State<SearchScreen>
         (context, index) {
           final song = songs[index];
           final title = isArtist
-              ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
-              : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
+              ? (song.artist.isEmpty ? context.l10n.unknown : song.artist)
+              : (_isUnknownAlbum(song.album)
+                    ? context.l10n.unknown
+                    : song.album);
 
           return _entry(
             start + index,
@@ -1529,10 +1546,10 @@ class _ScoredSong {
 
 class _SearchFilterData {
   final _SearchFilter filter;
-  final String title;
+  final String titleKey;
   final IconData icon;
 
-  const _SearchFilterData(this.filter, this.title, this.icon);
+  const _SearchFilterData(this.filter, this.titleKey, this.icon);
 }
 
 class _SearchFilterButton extends StatelessWidget {
@@ -1550,6 +1567,7 @@ class _SearchFilterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final title = context.l10n.get(data.titleKey);
 
     return Material(
       color: selected
@@ -1579,7 +1597,7 @@ class _SearchFilterButton extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                data.title,
+                title,
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: selected
                       ? AppTheme.accent
@@ -1754,33 +1772,16 @@ class _YouTubeDownloadRequest {
 }
 
 enum AudioFormat {
-  mp3(
-    label: 'MP3',
-    subtitle: 'Comprimido y compatible',
-    extension: 'mp3',
-    icon: Icons.audiotrack_rounded,
-  ),
-  flac(
-    label: 'FLAC',
-    subtitle: 'Audio sin pérdida',
-    extension: 'flac',
-    icon: Icons.graphic_eq_rounded,
-  ),
-  wav(
-    label: 'WAV',
-    subtitle: 'Audio sin comprimir',
-    extension: 'wav',
-    icon: Icons.multitrack_audio_rounded,
-  );
+  mp3(label: 'MP3', extension: 'mp3', icon: Icons.audiotrack_rounded),
+  flac(label: 'FLAC', extension: 'flac', icon: Icons.graphic_eq_rounded),
+  wav(label: 'WAV', extension: 'wav', icon: Icons.multitrack_audio_rounded);
 
   final String label;
-  final String subtitle;
   final String extension;
   final IconData icon;
 
   const AudioFormat({
     required this.label,
-    required this.subtitle,
     required this.extension,
     required this.icon,
   });
@@ -1974,11 +1975,11 @@ class _YouTubeDownloadConfigDialogState
 
     final fileName = _sanitizeFileName(_nameController.text);
     if (fileName.isEmpty) {
-      widget.onError('Escribe un nombre de archivo válido.');
+      widget.onError(context.l10n.ytChooseValidFileName);
       return;
     }
     if (_directory.isEmpty) {
-      widget.onError('Elige una carpeta de descarga.');
+      widget.onError(context.l10n.ytChooseFolderFirst);
       return;
     }
 
@@ -2099,7 +2100,7 @@ class _YouTubeDownloadConfigDialogState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Descargar',
+                            context.l10n.ytDownloadTitle,
                             style: theme.textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.bold,
                               letterSpacing: -0.3,
@@ -2129,7 +2130,7 @@ class _YouTubeDownloadConfigDialogState
                     IconButton(
                       onPressed: () => Navigator.pop(context),
                       icon: const Icon(Icons.close_rounded),
-                      tooltip: 'Cerrar',
+                      tooltip: context.l10n.close,
                       visualDensity: VisualDensity.compact,
                       color: AppTheme.textSecondary,
                     ),
@@ -2137,7 +2138,7 @@ class _YouTubeDownloadConfigDialogState
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Directorio de guardado',
+                  context.l10n.ytDownloadDirectory,
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: AppTheme.textSecondary,
                     fontWeight: FontWeight.w600,
@@ -2146,12 +2147,14 @@ class _YouTubeDownloadConfigDialogState
                 const SizedBox(height: 8),
                 _optionTile(
                   icon: Icons.folder_outlined,
-                  title: _directory.isEmpty ? 'Elegir carpeta' : _directory,
-                  subtitle: 'Seleccionar ubicación',
+                  title: _directory.isEmpty
+                      ? context.l10n.chooseFolder
+                      : _directory,
+                  subtitle: context.l10n.selectLocation,
                   showCheck: false,
                   onTap: () async {
                     final picked = await FilePicker.getDirectoryPath(
-                      dialogTitle: 'Elegir carpeta de descarga',
+                      dialogTitle: context.l10n.downloadFolder,
                       initialDirectory: _directory.isEmpty ? null : _directory,
                     );
 
@@ -2162,7 +2165,7 @@ class _YouTubeDownloadConfigDialogState
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Nombre del archivo',
+                  context.l10n.ytFileName,
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: AppTheme.textSecondary,
                     fontWeight: FontWeight.w600,
@@ -2176,13 +2179,13 @@ class _YouTubeDownloadConfigDialogState
                   autofocus: false,
                   onChanged: (_) => setState(() {}),
                   decoration: _inputDecoration(
-                    'Nombre sin extensión',
+                    context.l10n.ytFileNameHint,
                     Icons.drive_file_rename_outline_rounded,
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Formato de descarga',
+                  context.l10n.downloadFormat,
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: AppTheme.textSecondary,
                     fontWeight: FontWeight.w600,
@@ -2193,7 +2196,11 @@ class _YouTubeDownloadConfigDialogState
                   _optionTile(
                     icon: format.icon,
                     title: format.label,
-                    subtitle: format.subtitle,
+                    subtitle: switch (format) {
+                      AudioFormat.mp3 => context.l10n.compressedCompatible,
+                      AudioFormat.flac => context.l10n.losslessAudio,
+                      AudioFormat.wav => context.l10n.uncompressedAudio,
+                    },
                     selected: _selectedFormat == format,
                     onTap: () {
                       setState(() => _selectedFormat = format);
@@ -2215,7 +2222,7 @@ class _YouTubeDownloadConfigDialogState
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        child: const Text('Cancelar'),
+                        child: Text(context.l10n.cancel),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -2233,7 +2240,7 @@ class _YouTubeDownloadConfigDialogState
                           ),
                         ),
                         icon: const Icon(Icons.download_rounded, size: 18),
-                        label: const Text('Descargar'),
+                        label: Text(context.l10n.download),
                       ),
                     ),
                   ],
@@ -2296,9 +2303,7 @@ class _YouTubeDownloadProgressDialogState
 
   Future<void> _startDownload() async {
     if (!Platform.isAndroid) {
-      widget.onError(
-        'La descarga con Extractor solo está habilitada en Android.',
-      );
+      widget.onError(context.l10n.ytAndroidOnly);
       if (mounted) Navigator.pop(context);
       return;
     }
@@ -2307,7 +2312,7 @@ class _YouTubeDownloadProgressDialogState
       _phase = _DialogPhase.downloading;
       _isInitializing = true;
       _progress = 0;
-      _status = 'Inicializando el descargador…';
+      _status = context.l10n.ytPreparingDownloader;
       _errorMessage = null;
       _savedPath = null;
     });
@@ -2324,8 +2329,7 @@ class _YouTubeDownloadProgressDialogState
 
       if (!initResult.success) {
         final errorMsg =
-            initResult.errorMessage ??
-            'No se pudo inicializar Extractor. Verifica tu conexión a internet.';
+            initResult.errorMessage ?? context.l10n.ytInitializeFailed;
         throw Exception(errorMsg);
       }
 
@@ -2336,7 +2340,7 @@ class _YouTubeDownloadProgressDialogState
 
       setState(() {
         _isInitializing = false;
-        _status = 'Descargando audio…';
+        _status = context.l10n.ytDownloadingStatus;
       });
 
       await _progressSubscription?.cancel();
@@ -2346,7 +2350,7 @@ class _YouTubeDownloadProgressDialogState
 
         setState(() {
           _progress = progress.progress;
-          _status = 'Descargando audio…';
+          _status = context.l10n.ytDownloadingStatus;
         });
       });
 
@@ -2379,7 +2383,7 @@ class _YouTubeDownloadProgressDialogState
 
       if (result.status != OperationStatus.success) {
         throw Exception(
-          result.errorMessage ?? 'No se pudo descargar el audio.',
+          result.errorMessage ?? context.l10n.ytDownloadErrorMessage,
         );
       }
 
@@ -2414,16 +2418,14 @@ class _YouTubeDownloadProgressDialogState
       }
 
       if (downloadedFile == null) {
-        throw Exception(
-          'La descarga terminó pero no se encontró el archivo generado.',
-        );
+        throw Exception(context.l10n.ytDownloadFinishedNoFile);
       }
 
       if (!mounted) return;
 
       setState(() {
         _progress = 100;
-        _status = 'Descarga completada';
+        _status = context.l10n.ytDownloadCompleted;
         _savedPath = downloadedFile!.path;
         _phase = _DialogPhase.completed;
       });
@@ -2518,20 +2520,22 @@ class _YouTubeDownloadProgressDialogState
       _DialogPhase.downloading => (
         AppTheme.accent,
         _isInitializing ? Icons.settings_rounded : Icons.download_rounded,
-        _isInitializing ? 'Preparando descargador' : 'Descargando…',
-        _isInitializing ? 'Esto puede tardar la primera vez' : _status,
+        _isInitializing
+            ? context.l10n.ytPreparingDownloader
+            : context.l10n.ytDownloading,
+        _isInitializing ? context.l10n.ytPreparingDownloaderSubtitle : _status,
       ),
       _DialogPhase.completed => (
         AppTheme.accent,
         Icons.check_rounded,
-        'Descarga completada',
+        context.l10n.ytDownloadCompleted,
         widget.request.format.label,
       ),
       _DialogPhase.error => (
         Colors.redAccent,
         Icons.close_rounded,
-        'No se pudo descargar',
-        'Ocurrió un error inesperado',
+        context.l10n.ytDownloadFailed,
+        context.l10n.ytDownloadFailedSubtitle,
       ),
     };
 
@@ -2617,7 +2621,7 @@ class _YouTubeDownloadProgressDialogState
           IconButton(
             onPressed: () => Navigator.pop(context),
             icon: const Icon(Icons.close_rounded),
-            tooltip: 'Cerrar',
+            tooltip: context.l10n.close,
             visualDensity: VisualDensity.compact,
             color: AppTheme.textSecondary,
           ),
@@ -2690,7 +2694,7 @@ class _YouTubeDownloadProgressDialogState
         ),
         const SizedBox(height: 14),
         Text(
-          'No cierres esta ventana mientras se descarga.',
+          context.l10n.ytDoNotClose,
           style: theme.textTheme.bodySmall?.copyWith(
             color: AppTheme.textSecondary,
             fontStyle: FontStyle.italic,
@@ -2713,7 +2717,7 @@ class _YouTubeDownloadProgressDialogState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Archivo guardado correctamente',
+                context.l10n.ytFileSavedSuccessfully,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
@@ -2762,7 +2766,7 @@ class _YouTubeDownloadProgressDialogState
             ),
           ),
           child: Text(
-            _errorMessage ?? 'Ocurrió un error inesperado.',
+            _errorMessage ?? context.l10n.ytUnexpectedError,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurface,
             ),
@@ -2791,7 +2795,7 @@ class _YouTubeDownloadProgressDialogState
               ),
             ),
             icon: const Icon(Icons.done_rounded, size: 18),
-            label: const Text('Cerrar'),
+            label: Text(context.l10n.ytDownloadClose),
           ),
         );
 
@@ -2809,7 +2813,7 @@ class _YouTubeDownloadProgressDialogState
               ),
             ),
             icon: const Icon(Icons.close_rounded, size: 18),
-            label: const Text('Cerrar'),
+            label: Text(context.l10n.ytDownloadClose),
           ),
         );
     }

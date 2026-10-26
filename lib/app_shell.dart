@@ -10,6 +10,7 @@ import 'ui/search/search_screen.dart';
 import 'ui/settings/settings_screen.dart';
 import 'core/services/playback_service.dart';
 import 'core/services/playback_queue.dart';
+import 'l10n/app_localizations.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -54,11 +55,11 @@ class _AppShellState extends State<AppShell> {
     milliseconds: 320,
   );
 
-  static const List<String> _titles = [
-    'Inicio',
-    'Biblioteca',
-    'Buscar',
-    'Configuración',
+  List<String> _titles(BuildContext context) => [
+    context.l10n.home,
+    context.l10n.library,
+    context.l10n.search,
+    context.l10n.settings,
   ];
 
   static const List<IconData> _icons = [
@@ -494,7 +495,7 @@ class _AppShellState extends State<AppShell> {
           ),
           Expanded(
             child: Text(
-              _titles[_selectedIndex],
+              _titles(context)[_selectedIndex],
               style: Theme.of(context).textTheme.titleMedium,
               overflow: TextOverflow.ellipsis,
             ),
@@ -535,7 +536,7 @@ class _AppShellState extends State<AppShell> {
                       duration: _sidebarAnimationDuration,
                       opacity: _sidebarExpanded ? 1 : 0,
                       child: Text(
-                        'MENÚ PRINCIPAL',
+                        context.l10n.mainMenu,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -576,7 +577,8 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
           ),
-          for (int i = 0; i < _titles.length; i++) _buildSidebarItem(i),
+          for (int i = 0; i < _titles(context).length; i++)
+            _buildSidebarItem(i),
           const Spacer(),
           SizedBox(
             height: 28,
@@ -643,7 +645,7 @@ class _AppShellState extends State<AppShell> {
                     child: Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: Text(
-                        _titles[index],
+                        _titles(context)[index],
                         maxLines: 1,
                         softWrap: false,
                         overflow: TextOverflow.clip,
@@ -672,28 +674,28 @@ class _AppShellState extends State<AppShell> {
         _dismissKeyboard();
         _selectPage(index);
       },
-      destinations: const [
+      destinations: [
         NavigationDestination(
           icon: Icon(Icons.home_outlined),
           selectedIcon: Icon(Icons.home_rounded),
-          label: 'Inicio',
+          label: context.l10n.home,
           tooltip: '',
         ),
         NavigationDestination(
           icon: Icon(Icons.library_music_outlined),
           selectedIcon: Icon(Icons.library_music_rounded),
-          label: 'Biblioteca',
+          label: context.l10n.library,
           tooltip: '',
         ),
         NavigationDestination(
           icon: Icon(Icons.search_rounded),
-          label: 'Buscar',
+          label: context.l10n.search,
           tooltip: '',
         ),
         NavigationDestination(
           icon: Icon(Icons.settings_outlined),
           selectedIcon: Icon(Icons.settings_rounded),
-          label: 'Ajustes',
+          label: context.l10n.settings,
           tooltip: '',
         ),
       ],

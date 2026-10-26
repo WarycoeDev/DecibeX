@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:media_metadata/media_metadata.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../models/song.dart';
 
 class LibraryScanner extends ChangeNotifier {
@@ -36,6 +38,32 @@ class LibraryScanner extends ChangeNotifier {
 
   static const int _parallelism = 3;
   static const int _publishBatchSize = 50;
+
+  /// Valores "fallback" que pudieron haberse persistido en índices antiguos.
+  /// Al leer el índice se normalizan al fallback del idioma activo.
+  static const _legacyUnknownArtists = {
+    'Artista desconocido',
+    'Unknown artist',
+  };
+  static const _legacyUnknownAlbums = {'Álbum desconocido', 'Unknown album'};
+
+  /// Localización para mensajes visibles en UI. Se inyecta desde `main.dart`
+  /// mediante [attachLocalizations]. Si es null (p. ej. antes de que la app
+  /// termine de arrancar), cae a inglés.
+  AppLocalizations? _l10n;
+
+  AppLocalizations get _tr => _l10n ?? AppLocalizations(const Locale('en'));
+
+  /// Inyecta las localizaciones activas. Llamar desde `main.dart` cada vez
+  /// que cambie el locale, o al menos una vez antes de llamar a [initialize].
+  void attachLocalizations(AppLocalizations localizations) {
+    _l10n = localizations;
+    // Reconstruye las canciones para que los fallbacks (artista/álbum)
+    // se resuelvan en el nuevo idioma y la UI se actualice.
+    _publishSongs();
+    // Si había un mensaje de error ya mostrado, lo re-traducimos.
+    _notifyIfAlive();
+  }
 
   final Map<String, Map<String, dynamic>> _index = {};
   final LinkedHashSet<String> _favoritePaths = LinkedHashSet<String>();
@@ -70,7 +98,24 @@ class LibraryScanner extends ChangeNotifier {
   int _configurationRevision = 0;
 
   bool isScanning = false;
-  String? error;
+
+  /// Mensaje de error actual. Guardamos la clave y parámetros para poder
+  /// retraducir el mensaje cuando cambie el idioma.
+  String? _errorKey;
+  Map<String, Object?> _errorArgs = const {};
+  Object? _errorRawValue;
+
+  /// Mensaje de error ya traducido al idioma activo.
+  String? get error {
+    final key = _errorKey;
+    if (key == null) return null;
+    if (key == 'plain') {
+      // Mensaje que no requiere traducción (ya viene formateado).
+      return _errorRawValue?.toString();
+    }
+    return _tr.get(key, _errorArgs);
+  }
+
   DateTime? lastScan;
 
   List<Song> get songs => UnmodifiableListView<Song>(_songs);
@@ -84,6 +129,16 @@ class LibraryScanner extends ChangeNotifier {
   int get songCount => _songs.where((song) => !song.isPodcast).length;
 
   int get podcastCount => _songs.where((song) => song.isPodcast).length;
+
+  void _setError(
+    String? key, {
+    Map<String, Object?> args = const {},
+    Object? raw,
+  }) {
+    _errorKey = key;
+    _errorArgs = args;
+    _errorRawValue = raw;
+  }
 
   Future<Directory> _settingsDirectory() async {
     if (Platform.isAndroid) {
@@ -166,10 +221,6 @@ class LibraryScanner extends ChangeNotifier {
       await refreshConfiguration();
       if (_disposed) return;
 
-      // Refresco periódico de la configuración (settings.decibex).
-      // NO escanea la biblioteca: solo relee el archivo de configuración
-      // y, si cambió, reconfigura watchers y lanza un scan. Si no cambió,
-      // no hace nada.
       _periodicTimer = Timer.periodic(
         const Duration(seconds: 2),
         (_) => unawaited(refreshConfiguration()),
@@ -177,7 +228,7 @@ class LibraryScanner extends ChangeNotifier {
     } catch (e) {
       if (_disposed) return;
 
-      error = 'No se pudo inicializar la biblioteca: $e';
+      _setError('libraryInitError', args: {'error': e});
       _notifyIfAlive();
     }
   }
@@ -213,6 +264,20 @@ class LibraryScanner extends ChangeNotifier {
             entry['mediaType'] = entry['mediaType'] == 'podcast'
                 ? 'podcast'
                 : 'music';
+
+            // Normaliza fallbacks heredados (idiomas viejos) a marcador neutro
+            // para que al publicar se resuelvan en el idioma activo.
+            final artist = entry['artist'];
+            if (artist is String &&
+                _legacyUnknownArtists.contains(artist.trim())) {
+              entry['artist'] = '';
+            }
+
+            final album = entry['album'];
+            if (album is String &&
+                _legacyUnknownAlbums.contains(album.trim())) {
+              entry['album'] = '';
+            }
 
             _index[path] = entry;
           } catch (_) {}
@@ -267,7 +332,7 @@ class LibraryScanner extends ChangeNotifier {
           ..addAll(_favoritePaths);
       }
     } catch (e) {
-      debugPrint('[LibraryScanner] No se pudieron cargar los favoritos: $e');
+      debugPrint('[LibraryScanner] Failed to load favorites: $e');
     }
   }
 
@@ -335,7 +400,7 @@ class LibraryScanner extends ChangeNotifier {
     });
 
     _favoritesWriteQueue = operation.catchError((Object e) {
-      debugPrint('[LibraryScanner] Error guardando favoritos: $e');
+      debugPrint('[LibraryScanner] Error saving favorites: $e');
     });
 
     return operation;
@@ -399,9 +464,7 @@ class LibraryScanner extends ChangeNotifier {
 
       if (!await file.exists()) {
         if (_directories.isNotEmpty || _podcastDirectories.isNotEmpty) {
-          error =
-              'No se encontró el archivo de configuración. '
-              'Se conservará la configuración anterior.';
+          _setError('configFileNotFound');
           _notifyIfAlive();
           return;
         }
@@ -445,13 +508,13 @@ class LibraryScanner extends ChangeNotifier {
       }
 
       if (!_disposed) {
-        error = null;
+        _setError(null);
         _notifyIfAlive();
       }
     } catch (e) {
       if (_disposed) return;
 
-      error = 'No se pudo actualizar la configuración: $e';
+      _setError('configUpdateError', args: {'error': e});
       _notifyIfAlive();
     }
   }
@@ -465,7 +528,6 @@ class LibraryScanner extends ChangeNotifier {
     return setA.length == setB.length && setA.containsAll(setB);
   }
 
-  /// Configura el watcher del directorio de settings de forma segura.
   Future<void> _configureSettingsWatcher(Directory directory) async {
     if (_disposed) return;
 
@@ -494,7 +556,7 @@ class LibraryScanner extends ChangeNotifier {
             cancelOnError: false,
           );
     } catch (e) {
-      debugPrint('[LibraryScanner] No se pudo vigilar settings: $e');
+      debugPrint('[LibraryScanner] Failed to watch settings: $e');
     }
   }
 
@@ -510,7 +572,6 @@ class LibraryScanner extends ChangeNotifier {
   }
 
   Future<void> _configureWatchers() async {
-    // Cancelar todos los watchers anteriores.
     final oldWatchers = _directoryWatchers.values.toList();
     _directoryWatchers.clear();
     _watchedPaths.clear();
@@ -531,8 +592,6 @@ class LibraryScanner extends ChangeNotifier {
       try {
         final directory = Directory(path);
         if (!await directory.exists()) {
-          // Si el directorio no existe todavía, lo creamos para poder
-          // vigilarlo cuando el usuario lo cree después.
           try {
             await directory.create(recursive: true);
           } catch (_) {
@@ -542,14 +601,11 @@ class LibraryScanner extends ChangeNotifier {
 
         await _watchDirectory(directory.path);
       } catch (e) {
-        debugPrint('[LibraryScanner] No se pudo vigilar "$path": $e');
+        debugPrint('[LibraryScanner] Failed to watch "$path": $e');
       }
     }
   }
 
-  /// Vigila un directorio concreto y, si [recursive] es true, también
-  /// todos sus subdirectorios (necesario porque `recursive: true` no
-  /// funciona en Android/iOS).
   Future<void> _watchDirectory(String path) async {
     if (_disposed) return;
     if (_watchedPaths.contains(path)) return;
@@ -559,8 +615,6 @@ class LibraryScanner extends ChangeNotifier {
     try {
       final directory = Directory(path);
 
-      // En plataformas donde `recursive` no funciona (Android/iOS),
-      // vigilamos cada subdirectorio individualmente.
       final useNativeRecursive = !Platform.isAndroid && !Platform.isIOS;
 
       if (useNativeRecursive && _recursive) {
@@ -569,20 +623,19 @@ class LibraryScanner extends ChangeNotifier {
             .listen(
               (event) => _handleFileSystemEvent(event),
               onError: (Object e) {
-                debugPrint('[LibraryScanner] Watcher error en "$path": $e');
+                debugPrint('[LibraryScanner] Watcher error on "$path": $e');
                 _scheduleScan();
               },
               cancelOnError: false,
             );
         _directoryWatchers[path] = subscription;
       } else {
-        // Vigilamos este directorio (no recursivo).
         final subscription = directory
             .watch(events: FileSystemEvent.all, recursive: false)
             .listen(
               (event) => _handleFileSystemEvent(event),
               onError: (Object e) {
-                debugPrint('[LibraryScanner] Watcher error en "$path": $e');
+                debugPrint('[LibraryScanner] Watcher error on "$path": $e');
                 _scheduleScan();
               },
               cancelOnError: false,
@@ -590,8 +643,6 @@ class LibraryScanner extends ChangeNotifier {
         _directoryWatchers[path] = subscription;
       }
 
-      // Si es recursivo y no usamos recursividad nativa, recorremos
-      // los subdirectorios existentes y los vigilamos uno a uno.
       if (_recursive && !useNativeRecursive) {
         await for (final entity in directory.list(
           recursive: false,
@@ -604,14 +655,13 @@ class LibraryScanner extends ChangeNotifier {
         }
       }
     } catch (e) {
-      debugPrint('[LibraryScanner] No se pudo vigilar "$path": $e');
+      debugPrint('[LibraryScanner] Failed to watch "$path": $e');
     }
   }
 
   void _handleFileSystemEvent(FileSystemEvent event) {
     if (_disposed) return;
 
-    // Si se crea un directorio nuevo, empezamos a vigilarlo también.
     if (event is FileSystemCreateEvent || event is FileSystemModifyEvent) {
       final path = event.path;
       try {
@@ -628,8 +678,6 @@ class LibraryScanner extends ChangeNotifier {
   void _scheduleScan() {
     if (_disposed) return;
 
-    // Debounce para agrupar los múltiples eventos (create + modify + rename)
-    // que emiten los gestores de archivos al copiar un solo archivo.
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 800), () {
       if (!_disposed) {
@@ -676,7 +724,7 @@ class LibraryScanner extends ChangeNotifier {
     if (_disposed) return;
 
     isScanning = true;
-    error = null;
+    _setError(null);
     _notifyIfAlive();
 
     final scanDirectories = List<String>.from(_directories);
@@ -718,7 +766,7 @@ class LibraryScanner extends ChangeNotifier {
             }
           } catch (e) {
             enumerationComplete = false;
-            debugPrint('[LibraryScanner] No se pudo leer "$path": $e');
+            debugPrint('[LibraryScanner] Failed to read "$path": $e');
           }
         }
       }
@@ -790,9 +838,7 @@ class LibraryScanner extends ChangeNotifier {
           }
         }
       } else if (!enumerationComplete) {
-        error =
-            'El escaneo terminó parcialmente. '
-            'Se conservaron los archivos que no pudieron verificarse.';
+        _setError('scanPartialWarning');
       }
 
       _publishSongs();
@@ -802,7 +848,7 @@ class LibraryScanner extends ChangeNotifier {
       lastScan = DateTime.now();
     } catch (e, stackTrace) {
       if (!_disposed) {
-        error = 'Error durante el escaneo: $e';
+        _setError('scanError', args: {'error': e});
         debugPrint('$stackTrace');
       }
     } finally {
@@ -840,8 +886,11 @@ class LibraryScanner extends ChangeNotifier {
 
       final title =
           _nonEmpty(metadata?.title) ?? _filenameWithoutExtension(path);
-      final artist = _nonEmpty(metadata?.artist) ?? 'Artista desconocido';
-      final album = _nonEmpty(metadata?.album) ?? 'Álbum desconocido';
+
+      // Guardamos cadena vacía cuando no hay artista/álbum real, para que
+      // el fallback se resuelva en el idioma activo en _publishSongs.
+      final artist = _nonEmpty(metadata?.artist) ?? '';
+      final album = _nonEmpty(metadata?.album) ?? '';
       final duration = _formatDuration(metadata?.duration);
 
       String? artworkPath = previous?['artworkPath'] as String?;
@@ -863,7 +912,6 @@ class LibraryScanner extends ChangeNotifier {
         'mediaType': mediaType,
         'modified': stat.modified.millisecondsSinceEpoch,
         'size': stat.size,
-        // Conserva la ganancia ReplayGain ya calculada (si existía).
         'replayGainDb': previous?['replayGainDb'],
       };
     } catch (e) {
@@ -873,31 +921,62 @@ class LibraryScanner extends ChangeNotifier {
 
       _index[path] = {
         'title': previous?['title'] ?? _filenameWithoutExtension(path),
-        'artist': previous?['artist'] ?? 'Artista desconocido',
-        'album': previous?['album'] ?? 'Álbum desconocido',
+        // También normalizamos aquí: si venía de un índice viejo con el
+        // fallback en español, lo dejamos vacío.
+        'artist': _normalizeUnknownArtist(previous?['artist']),
+        'album': _normalizeUnknownAlbum(previous?['album']),
         'duration': previous?['duration'] ?? '0:00',
         'filePath': path,
         'artworkPath': previous?['artworkPath'],
         'mediaType': mediaType,
         'modified': previous?['modified'] ?? 0,
         'size': previous?['size'] ?? 0,
-        // Conserva la ganancia ReplayGain ya calculada (si existía).
         'replayGainDb': previous?['replayGainDb'],
       };
 
-      debugPrint('[LibraryScanner] No se pudo procesar "$path": $e');
+      debugPrint('[LibraryScanner] Failed to process "$path": $e');
     }
+  }
+
+  String _normalizeUnknownArtist(dynamic value) {
+    if (value is! String) return '';
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    if (_legacyUnknownArtists.contains(trimmed)) return '';
+    return value;
+  }
+
+  String _normalizeUnknownAlbum(dynamic value) {
+    if (value is! String) return '';
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    if (_legacyUnknownAlbums.contains(trimmed)) return '';
+    return value;
   }
 
   void _publishSongs() {
     if (_disposed) return;
 
     final songs = <Song>[];
+    final fallbackArtist = _tr.unknownArtist;
+    final fallbackAlbum = _tr.unknownAlbum;
 
     for (final item in _index.entries) {
       try {
         final songData = Map<String, dynamic>.from(item.value);
         songData['favorite'] = _favoritePaths.contains(item.key);
+
+        // Resuelve fallbacks en el idioma activo en el momento de publicar.
+        final rawArtist = songData['artist'];
+        final rawAlbum = songData['album'];
+
+        if (rawArtist is! String || rawArtist.trim().isEmpty) {
+          songData['artist'] = fallbackArtist;
+        }
+
+        if (rawAlbum is! String || rawAlbum.trim().isEmpty) {
+          songData['album'] = fallbackAlbum;
+        }
 
         final song = Song.fromJson(songData);
 
@@ -905,7 +984,7 @@ class LibraryScanner extends ChangeNotifier {
           songs.add(song);
         }
       } catch (e) {
-        debugPrint('[LibraryScanner] Entrada de índice inválida: $e');
+        debugPrint('[LibraryScanner] Invalid index entry: $e');
       }
     }
 
@@ -926,9 +1005,6 @@ class LibraryScanner extends ChangeNotifier {
   // ReplayGain por archivo
   // ------------------------------------------------------------------
 
-  /// Guarda la ganancia ReplayGain calculada para [song] en el índice
-  /// en memoria y republica la lista. NO escribe el índice a disco: el
-  /// llamador controla el batching con [saveIndexNow].
   Future<void> setReplayGain(Song song, double? gainDb) async {
     if (_disposed) return;
 
@@ -939,7 +1015,6 @@ class LibraryScanner extends ChangeNotifier {
     _publishSongs();
   }
 
-  /// Persiste el índice actual en disco inmediatamente.
   Future<void> saveIndexNow() async {
     if (_disposed) return;
     await _saveIndex();
@@ -1038,7 +1113,7 @@ class LibraryScanner extends ChangeNotifier {
         ..addAll(previousOrder);
 
       _publishSongs();
-      error = 'No se pudo guardar el favorito: $e';
+      _setError('favoriteSaveError', args: {'error': e});
       _notifyIfAlive();
     }
   }

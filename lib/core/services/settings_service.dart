@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../l10n/app_localizations.dart';
+
 /// Fuente única de verdad para settings.decibex.
 ///
 /// - Lee el archivo una vez al arrancar.
@@ -27,6 +29,7 @@ class SettingsService extends ChangeNotifier {
   // --- Valores expuestos ---
   bool darkTheme = true;
   int accentColorValue = 0xFF6750A4;
+  AppLanguage language = AppLanguage.system;
 
   bool replayGainEnabled = false;
   double replayGainPreamp = 0;
@@ -153,6 +156,11 @@ class SettingsService extends ChangeNotifier {
 
     set(darkTheme, readBool('darkTheme', darkTheme), (v) => darkTheme = v);
 
+    final savedLanguage = AppLocalizations.languageFrom(
+      json['language'] as String?,
+    );
+    set(language, savedLanguage, (v) => language = v);
+
     final accent = json['accentColor'];
     if (accent is int && accent != accentColorValue) {
       accentColorValue = accent;
@@ -232,7 +240,7 @@ class SettingsService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------
-  // Setters inmediatos (para PlaybackService)
+  // Setters inmediatos (para PlaybackService / idioma)
   // ------------------------------------------------------------------
 
   /// Cambia el preamp global y notifica de inmediato a los listeners
@@ -251,6 +259,14 @@ class SettingsService extends ChangeNotifier {
     _notifyIfAlive();
   }
 
+  /// [NUEVO] Cambia el idioma y notifica de inmediato para que
+  /// `MaterialApp` reconstruya con el nuevo `Locale` sin esperar al disco.
+  void setLanguage(AppLanguage value) {
+    if (language == value) return;
+    language = value;
+    _notifyIfAlive();
+  }
+
   // ------------------------------------------------------------------
   // Persistencia
   // ------------------------------------------------------------------
@@ -261,6 +277,7 @@ class SettingsService extends ChangeNotifier {
       'version': 1,
       'darkTheme': darkTheme,
       'accentColor': accentColorValue,
+      'language': language.name,
       'replayGainEnabled': replayGainEnabled,
       'replayGainPreamp': replayGainPreamp,
       'fadeInEnabled': fadeInEnabled,
@@ -282,7 +299,7 @@ class SettingsService extends ChangeNotifier {
       final file = await _settingsFile();
       final json = const JsonEncoder.withIndent('  ').convert(serialize());
       await file.writeAsString(json, flush: true);
-      _notifyIfAlive(); // <-- nuevo
+      _notifyIfAlive();
     } catch (e) {
       debugPrint('[SettingsService] Error guardando settings: $e');
     }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_scanner.dart';
 import '../../core/services/statistics_service.dart';
@@ -226,12 +227,12 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 ListTile(
                   leading: const Icon(Icons.playlist_remove_rounded),
-                  title: const Text('Sobrescribir cola'),
+                  title: Text(context.l10n.overwriteQueue),
                   onTap: () => Navigator.pop(sheetContext, 'replace'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
+                  title: Text(context.l10n.cancel),
                   onTap: () => Navigator.pop(sheetContext, 'cancel'),
                 ),
               ],
@@ -339,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'TU ESPACIO MUSICAL',
+          context.l10n.yourMusicalSpace,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
@@ -350,14 +351,14 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         SizedBox(height: isCompact ? 8 : 10),
         Text(
-          'Tu música, a tu manera.',
+          context.l10n.yourMusicYourWay,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: headlineStyle,
         ),
         SizedBox(height: isCompact ? 6 : 8),
         Text(
-          'Todo lo que te gusta escuchar, en un solo lugar.',
+          context.l10n.everythingYouLove,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -437,14 +438,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return [
       IconButton.filledTonal(
-        tooltip: 'Agregar todos a la cola',
+        tooltip: context.l10n.addAllToQueue,
         onPressed: isEmpty ? null : onAddAll,
         icon: const Icon(Icons.queue_music_rounded),
       ),
       const SizedBox(width: 8),
       if (isCompact)
         IconButton.filled(
-          tooltip: 'Reproducir todo',
+          tooltip: context.l10n.playAll,
           onPressed: isEmpty ? null : onPlayAll,
           icon: const Icon(Icons.play_arrow_rounded),
         )
@@ -452,7 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
         FilledButton.icon(
           onPressed: isEmpty ? null : onPlayAll,
           icon: const Icon(Icons.play_arrow_rounded),
-          label: Text(isDesktop ? 'Reproducir todo' : 'Reproducir'),
+          label: Text(isDesktop ? context.l10n.playAll : context.l10n.play),
         ),
     ];
   }
@@ -464,8 +465,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ) {
     return _buildSectionHeader(
       context,
-      title: 'Más escuchadas',
-      subtitle: 'Las canciones que más suenan',
+      title: context.l10n.mostPlayed,
+      subtitle: context.l10n.mostPlayedSubtitle,
       icon: Icons.trending_up_rounded,
       layout: layout,
       actions: _buildCollectionActions(
@@ -484,8 +485,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ) {
     return _buildSectionHeader(
       context,
-      title: 'Tus favoritos',
-      subtitle: 'Tu colección personal',
+      title: context.l10n.yourFavorites,
+      subtitle: context.l10n.yourFavoritesSubtitle,
       icon: Icons.favorite_rounded,
       layout: layout,
       actions: _buildCollectionActions(
@@ -509,18 +510,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!_hasDirectories) {
         icon = Icons.folder_open_rounded;
-        title = 'Configura tu biblioteca';
-        message =
-            'Agrega una carpeta en Configuración > Biblioteca para empezar.';
+        title = context.l10n.configureLibrary;
+        message = context.l10n.configureLibrarySubtitle;
       } else if (_scanner.songs.isEmpty) {
         icon = Icons.music_off_rounded;
-        title = 'Aún no hay canciones';
-        message = 'Escanea tu biblioteca para empezar a escuchar música.';
+        title = context.l10n.noSongsYet;
+        message = context.l10n.scanLibrarySubtitle;
       } else {
         icon = Icons.trending_up_rounded;
-        title = 'Aún no hay canciones escuchadas';
-        message =
-            'Reproduce una canción al menos 5 segundos para que aparezca aquí.';
+        title = context.l10n.noPlayedSongs;
+        message = context.l10n.playSongToAppear;
       }
 
       return Container(
@@ -626,14 +625,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Todavía no tienes favoritos',
+              context.l10n.noFavoritesYet,
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             Text(
-              'Marca canciones como favoritas para verlas aquí.',
+              context.l10n.markFavoritesSubtitle,
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,

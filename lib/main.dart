@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
@@ -13,6 +14,7 @@ import 'app_shell.dart';
 import 'ui/app_theme.dart';
 import 'core/services/library_scanner.dart';
 import 'core/services/settings_service.dart';
+import 'l10n/app_localizations.dart';
 import 'core/services/statistics_service.dart';
 import 'core/services/podcast_statistics_service.dart';
 import 'core/services/audio_handler.dart';
@@ -34,6 +36,16 @@ Future<void> _initializeLocalNotifications() async {
   await flutterLocalNotificationsPlugin.initialize(
     settings: initializationSettings,
   );
+}
+
+/// Resuelve el Locale efectivo combinando la preferencia guardada y el
+/// locale del sistema. Es útil antes de tener `BuildContext`.
+Locale _resolveInitialLocale() {
+  final preference = SettingsService.instance.language;
+
+  final systemLocale = WidgetsBinding.instance.platformDispatcher.locale;
+
+  return AppLocalizations.resolve(preference, systemLocale);
 }
 
 Future<void> main() async {
@@ -64,19 +76,34 @@ Future<void> main() async {
         ]);
       }
 
+      // Carga settings antes de AudioService para poder resolver el idioma
+      // de los textos del canal de notificación y para inyectar las
+      // localizaciones en LibraryScanner.
+      try {
+        await SettingsService.instance.initialize();
+      } catch (e, st) {
+        debugPrint('[main] SettingsService init error: $e\n$st');
+      }
+
+      final initialLocale = _resolveInitialLocale();
+      final l10n = AppLocalizations(initialLocale);
+
+      // Inyectamos localizaciones en el LibraryScanner para que sus
+      // mensajes de error visibles en UI se traduzcan.
+      LibraryScanner.instance.attachLocalizations(l10n);
+
       // Conserva el servicio de reproducción de audio existente.
       await AudioService.init(
         builder: DecibeXAudioHandler.new,
         config: AudioServiceConfig(
           androidNotificationChannelId: 'com.example.decibex.audio',
-          androidNotificationChannelName: 'Reproducción de audio',
+          androidNotificationChannelName: l10n.audioNotificationChannelName,
           androidNotificationChannelDescription:
-              'Controles de reproducción de DecibeX',
+              l10n.audioNotificationChannelDescription,
           androidNotificationOngoing: true,
           androidStopForegroundOnPause: true,
           artDownscaleWidth: 512,
           artDownscaleHeight: 512,
-
           androidNotificationIcon: 'drawable/ic_stat_notification_icon',
         ),
       );
@@ -84,7 +111,7 @@ Future<void> main() async {
       runApp(const DecibeXApp());
     },
     (error, stack) {
-      debugPrint('[Zona raíz] Error no capturado: $error');
+      debugPrint('[Zona raíz] Uncaught error: $error');
       debugPrint('$stack');
     },
   );
@@ -103,6 +130,7 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
 
   bool? _appliedDarkTheme;
   int? _appliedAccentColor;
+  AppLanguage? _appliedLanguage;
 
   @override
   void initState() {
@@ -128,6 +156,9 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
     final s = SettingsService.instance;
     final accent = s.accentColorValue;
 
+    // Inicializa el idioma aplicado la primera vez.
+    _appliedLanguage ??= s.language;
+
     if (_appliedDarkTheme == s.darkTheme && _appliedAccentColor == accent) {
       return;
     }
@@ -143,13 +174,30 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
 
   void _onSettingsChanged() {
     if (!mounted) return;
+
     _applyThemeFromSettings();
+
+    // Si cambió el idioma, reconstruye MaterialApp para que cambie el
+    // Locale y se recargue AppLocalizations. También actualiza las
+    // localizaciones del LibraryScanner para futuros mensajes de error.
+    final newLanguage = SettingsService.instance.language;
+    if (_appliedLanguage != newLanguage) {
+      _appliedLanguage = newLanguage;
+
+      final systemLocale = WidgetsBinding.instance.platformDispatcher.locale;
+      final resolved = AppLocalizations.resolve(newLanguage, systemLocale);
+      LibraryScanner.instance.attachLocalizations(AppLocalizations(resolved));
+
+      setState(() {});
+    }
   }
 
   Future<void> _initServices() async {
     if (_servicesInitialized) return;
     _servicesInitialized = true;
 
+    // SettingsService ya se inicializó en main(), pero por seguridad
+    // lo llamamos de nuevo (es idempotente).
     try {
       await SettingsService.instance.initialize();
     } catch (e, st) {
@@ -196,12 +244,12 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
           try {
             await LibraryScanner.instance.initialize();
           } catch (e, st) {
-            debugPrint('[main] Reintento LibraryScanner error: $e\n$st');
+            debugPrint('[main] LibraryScanner retry error: $e\n$st');
           }
         }
       }
     } catch (e) {
-      debugPrint('[main] Permiso error: $e');
+      debugPrint('[main] Permission error: $e');
       _permissionRequested = false;
     }
   }
@@ -231,7 +279,7 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
         try {
           await LibraryScanner.instance.initialize();
         } catch (e, st) {
-          debugPrint('[main] Reinit LibraryScanner error: $e\n$st');
+          debugPrint('[main] LibraryScanner reinit error: $e\n$st');
         }
       }
     } catch (_) {
@@ -244,8 +292,23 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: AppTheme.notifier,
       builder: (context, child) {
+        final systemLocale = WidgetsBinding.instance.platformDispatcher.locale;
+        final locale = AppLocalizations.resolve(
+          SettingsService.instance.language,
+          systemLocale,
+        );
+        final l10n = AppLocalizations(locale);
+
         return MaterialApp(
-          title: 'DecibeX',
+          title: l10n.appName,
+          locale: locale,
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [
+            AppLocalizationsDelegate(),
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
           debugShowCheckedModeBanner: false,
           theme: AppTheme.current,
           home: const AppShell(),

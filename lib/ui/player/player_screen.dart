@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart' show LoopMode;
 
 import '../app_theme.dart';
+import '../../l10n/app_localizations.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/playback_queue.dart';
 import '../../core/models/song.dart';
@@ -319,6 +320,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required Song song,
     required PlaybackService playback,
   }) {
+    final l10n = context.l10n;
     final favorite = _isFavorite(song);
     final shuffle = playback.shuffleEnabled;
     final repeat = playback.repeatMode;
@@ -336,7 +338,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-            tooltip: favorite ? 'Quitar de favoritos' : 'Añadir a favoritos',
+            tooltip: favorite ? l10n.removeFromFavorites : l10n.addToFavorites,
             onPressed: () => _toggleFavorite(song),
             icon: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
@@ -362,7 +364,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Opciones de reproducción',
+            tooltip: l10n.playbackOptions,
             onPressed: () => _showPlaybackOptionsSheet(
               shuffleEnabled: shuffle,
               repeatMode: repeat,
@@ -389,6 +391,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         PlaybackService.instance,
       ]),
       builder: (context, _) {
+        final l10n = context.l10n;
         final queue = PlaybackQueue.instance.songs;
         final currentSong = playback.currentSong;
 
@@ -416,17 +419,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       size: 27,
                     ),
                     const SizedBox(width: 12),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Cola de reproducción',
-                        style: TextStyle(
+                        l10n.playbackQueue,
+                        style: const TextStyle(
                           fontSize: 19,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
                     Text(
-                      '${queue.length} canciones',
+                      l10n.nSongs(queue.length),
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.textSecondary,
@@ -448,7 +451,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               color: AppTheme.textSecondary,
                             ),
                             const SizedBox(height: 12),
-                            const Text('La cola está vacía'),
+                            Text(l10n.queueEmpty),
                           ],
                         ),
                       )
@@ -467,9 +470,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(
-                  queue.length > 1
-                      ? 'Arrastra el icono para cambiar el orden'
-                      : 'Pulsa una canción para reproducirla',
+                  queue.length > 1 ? l10n.dragToReorder : l10n.tapSongToPlay,
                   style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                 ),
               ),
@@ -481,6 +482,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildHeader(BuildContext context) {
+    final l10n = context.l10n;
+
     return SizedBox(
       height: 64,
       child: Padding(
@@ -488,16 +491,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: Row(
           children: [
             IconButton(
-              tooltip: 'Minimizar reproductor',
+              tooltip: l10n.minimizePlayer,
               onPressed: () => Navigator.of(context).maybePop(),
               icon: const Icon(Icons.keyboard_arrow_down_rounded),
               iconSize: 30,
             ),
-            const Expanded(
+            Expanded(
               child: Text(
-                'REPRODUCIENDO',
+                l10n.nowPlaying,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
@@ -505,7 +508,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
             IconButton(
-              tooltip: 'Cerrar reproductor y detener música',
+              tooltip: l10n.closePlayerAndStop,
               onPressed: () => _closePlayer(context),
               icon: const Icon(Icons.close_rounded),
               iconSize: 25,
@@ -585,6 +588,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     String artist, {
     required _LayoutSize layout,
   }) {
+    final l10n = context.l10n;
     final isCompact = layout == _LayoutSize.compact;
     final titleSize = isCompact ? 20.0 : 23.0;
     final artistSize = isCompact ? 14.0 : 16.0;
@@ -643,7 +647,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               key: ValueKey<String>(artist),
               width: double.infinity,
               child: Text(
-                artist.isEmpty ? 'Artista desconocido' : artist,
+                artist.isEmpty ? l10n.unknown : artist,
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -760,6 +764,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required VoidCallback onNext,
     required _LayoutSize layout,
   }) {
+    final l10n = context.l10n;
     final isCompact = layout == _LayoutSize.compact;
     final sideIconSize = isCompact ? 32.0 : 36.0;
     final sidePadding = isCompact ? 6.0 : 8.0;
@@ -770,7 +775,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          tooltip: 'Anterior',
+          tooltip: l10n.previous,
           onPressed: canPlayPrevious ? onPrevious : null,
           icon: const Icon(Icons.skip_previous_rounded),
           iconSize: sideIconSize,
@@ -785,7 +790,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
         SizedBox(width: gap),
         IconButton(
-          tooltip: 'Siguiente',
+          tooltip: l10n.next,
           onPressed: canPlayNext ? onNext : null,
           icon: const Icon(Icons.skip_next_rounded),
           iconSize: sideIconSize,
@@ -802,6 +807,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required bool shuffleEnabled,
     required LoopMode repeatMode,
   }) {
+    final l10n = context.l10n;
     final repeatIcon = switch (repeatMode) {
       LoopMode.one => Icons.repeat_one_rounded,
       LoopMode.all => Icons.repeat_rounded,
@@ -817,7 +823,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               icon: isFavorite
                   ? Icons.favorite_rounded
                   : Icons.favorite_border_rounded,
-              label: 'Favoritos',
+              label: l10n.favoritesQueue,
               isActive: isFavorite,
               onPressed: onFavoritePressed,
             ),
@@ -832,7 +838,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Expanded(
             child: _buildMenuButton(
               icon: Icons.queue_music_rounded,
-              label: 'Cola',
+              label: l10n.playbackQueue,
               onPressed: () => _showPlaybackQueue(context),
             ),
           ),
@@ -846,6 +852,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required LoopMode repeatMode,
     required IconData repeatIcon,
   }) {
+    final l10n = context.l10n;
     final isActive = shuffleEnabled || repeatMode != LoopMode.off;
 
     return InkWell(
@@ -866,7 +873,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
             const SizedBox(height: 5),
             Text(
-              'Reproducción',
+              l10n.playback,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
@@ -886,6 +893,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required bool shuffleEnabled,
     required LoopMode repeatMode,
   }) {
+    final l10n = context.l10n;
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.surface,
@@ -957,45 +966,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 children: [
                   Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Reproducción',
-                          style: TextStyle(
+                          l10n.playback,
+                          style: const TextStyle(
                             fontSize: 19,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Cerrar',
+                        tooltip: l10n.close,
                         onPressed: () => Navigator.pop(sheetContext),
                         icon: const Icon(Icons.close_rounded, size: 21),
                       ),
                     ],
                   ),
-                  buildSectionTitle('ALEATORIO'),
+                  buildSectionTitle(l10n.shuffle.toUpperCase()),
                   buildOption(
                     icon: Icons.shuffle_rounded,
-                    title: 'Reproducción aleatoria',
+                    title: l10n.shuffle,
                     selected: playback.shuffleEnabled,
                     onTap: () => unawaited(playback.toggleShuffle()),
                   ),
-                  buildSectionTitle('REPETICIÓN'),
+                  buildSectionTitle(l10n.repeatSection),
                   buildOption(
                     icon: Icons.repeat_rounded,
-                    title: 'No repetir',
+                    title: l10n.repeatOff,
                     selected: playback.repeatMode == LoopMode.off,
                     onTap: () => _setRepeatMode(LoopMode.off),
                   ),
                   buildOption(
                     icon: Icons.repeat_one_rounded,
-                    title: 'Repetir canción',
+                    title: l10n.repeatSong,
                     selected: playback.repeatMode == LoopMode.one,
                     onTap: () => _setRepeatMode(LoopMode.one),
                   ),
                   buildOption(
                     icon: Icons.repeat_rounded,
-                    title: 'Repetir cola',
+                    title: l10n.repeatQueue,
                     selected: playback.repeatMode == LoopMode.all,
                     onTap: () => _setRepeatMode(LoopMode.all),
                   ),
@@ -1029,6 +1038,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _showPlaybackQueue(BuildContext context) {
+    final l10n = context.l10n;
     final initialQueue = PlaybackQueue.instance.songs;
     final initialSong = PlaybackService.instance.currentSong;
     final initialIndex = initialQueue.indexWhere(
@@ -1082,10 +1092,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 size: 27,
                               ),
                               const SizedBox(width: 12),
-                              const Expanded(
+                              Expanded(
                                 child: Text(
-                                  'Cola de reproducción',
-                                  style: TextStyle(
+                                  l10n.playbackQueue,
+                                  style: const TextStyle(
                                     fontSize: 19,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -1094,14 +1104,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 ),
                               ),
                               Text(
-                                '${queue.length} canciones',
+                                l10n.nSongs(queue.length),
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: AppTheme.textSecondary,
                                 ),
                               ),
                               IconButton(
-                                tooltip: 'Cerrar',
+                                tooltip: l10n.close,
                                 onPressed: () =>
                                     Navigator.of(dialogContext).pop(),
                                 icon: const Icon(Icons.close_rounded),
@@ -1122,7 +1132,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         color: AppTheme.textSecondary,
                                       ),
                                       const SizedBox(height: 12),
-                                      const Text('La cola está vacía'),
+                                      Text(l10n.queueEmpty),
                                     ],
                                   ),
                                 )
@@ -1147,8 +1157,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           padding: const EdgeInsets.all(12),
                           child: Text(
                             queue.length > 1
-                                ? 'Arrastra el icono para cambiar el orden'
-                                : 'Pulsa una canción para reproducirla',
+                                ? l10n.dragToReorder
+                                : l10n.tapSongToPlay,
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textSecondary,
@@ -1231,6 +1241,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildEmptyPlayer(BuildContext context) {
+    final l10n = context.l10n;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -1243,14 +1255,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
               color: AppTheme.textSecondary,
             ),
             const SizedBox(height: 20),
-            const Text(
-              'No hay música reproduciéndose',
+            Text(
+              l10n.nothingPlaying,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
             Text(
-              'Selecciona una canción de tu biblioteca para comenzar.',
+              l10n.selectSongToStart,
               textAlign: TextAlign.center,
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
             ),
@@ -1258,7 +1270,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             FilledButton.icon(
               onPressed: () => Navigator.of(context).maybePop(),
               icon: const Icon(Icons.arrow_back_rounded),
-              label: const Text('Volver'),
+              label: Text(l10n.back),
             ),
           ],
         ),
@@ -1571,6 +1583,7 @@ class _AnimatedPlayPauseButtonState extends State<_AnimatedPlayPauseButton>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final size = widget.size;
 
     return ScaleTransition(
@@ -1594,7 +1607,7 @@ class _AnimatedPlayPauseButtonState extends State<_AnimatedPlayPauseButton>
           ],
         ),
         child: IconButton(
-          tooltip: widget.isPlaying ? 'Pausar' : 'Reproducir',
+          tooltip: widget.isPlaying ? l10n.pause : l10n.play,
           onPressed: _handlePress,
           icon: AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
@@ -1640,6 +1653,7 @@ class _QueueListView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final currentSong = playback.currentSong;
 
     return _QueueListContainer(
@@ -1787,7 +1801,7 @@ class _QueueListView extends StatelessWidget {
                               const SizedBox(height: 4),
                               Text(
                                 item.artist.isEmpty
-                                    ? 'Artista desconocido'
+                                    ? l10n.unknown
                                     : item.artist,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,

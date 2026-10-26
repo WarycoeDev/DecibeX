@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../app_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 import '../../core/models/song.dart';
 
@@ -21,7 +22,6 @@ import '../../core/services/playlist_service.dart';
 import '../../core/services/podcast_statistics_service.dart'; // [PODCAST]
 
 import '../../features/library/playlist_name_sheet.dart';
-import '../../features/library/playlist_name_dialog.dart';
 
 enum _LibraryTab { songs, podcasts, playlists, favorites, artists, albums }
 
@@ -41,19 +41,6 @@ class LibraryScreenState extends State<LibraryScreen>
   static const int _maxAnimatedItems = 16;
 
   static const String _settingsFileName = 'settings.decibex';
-
-  static const List<_LibraryTabData> _tabs = [
-    _LibraryTabData(_LibraryTab.songs, 'Canciones', Icons.music_note_rounded),
-    _LibraryTabData(_LibraryTab.podcasts, 'Podcasts', Icons.podcasts_rounded),
-    _LibraryTabData(
-      _LibraryTab.playlists,
-      'Playlists',
-      Icons.queue_music_rounded,
-    ),
-    _LibraryTabData(_LibraryTab.favorites, 'Favoritos', Icons.favorite_rounded),
-    _LibraryTabData(_LibraryTab.artists, 'Artistas', Icons.person_rounded),
-    _LibraryTabData(_LibraryTab.albums, 'Álbumes', Icons.album_rounded),
-  ];
 
   final LibraryScanner _scanner = LibraryScanner.instance;
 
@@ -127,6 +114,41 @@ class LibraryScreenState extends State<LibraryScreen>
     if (width < 800) return _LayoutSize.medium;
     return _LayoutSize.expanded;
   }
+
+  /// Datos de los tabs, localizados. Se construye con [context] porque
+  /// necesita leer [AppLocalizations].
+  List<_LibraryTabData> _buildTabsData(BuildContext context) => [
+    _LibraryTabData(
+      _LibraryTab.songs,
+      context.l10n.songs,
+      Icons.music_note_rounded,
+    ),
+    _LibraryTabData(
+      _LibraryTab.podcasts,
+      context.l10n.podcasts,
+      Icons.podcasts_rounded,
+    ),
+    _LibraryTabData(
+      _LibraryTab.playlists,
+      context.l10n.playlists,
+      Icons.queue_music_rounded,
+    ),
+    _LibraryTabData(
+      _LibraryTab.favorites,
+      context.l10n.favorites,
+      Icons.favorite_rounded,
+    ),
+    _LibraryTabData(
+      _LibraryTab.artists,
+      context.l10n.artists,
+      Icons.person_rounded,
+    ),
+    _LibraryTabData(
+      _LibraryTab.albums,
+      context.l10n.albums,
+      Icons.album_rounded,
+    ),
+  ];
 
   @override
   void initState() {
@@ -264,12 +286,12 @@ class LibraryScreenState extends State<LibraryScreen>
               children: [
                 ListTile(
                   leading: const Icon(Icons.playlist_remove_rounded),
-                  title: const Text('Sobrescribir cola'),
+                  title: Text(context.l10n.overwriteQueue),
                   onTap: () => Navigator.pop(sheetContext, true),
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
+                  title: Text(context.l10n.cancel),
                   onTap: () => Navigator.pop(sheetContext, false),
                 ),
               ],
@@ -753,70 +775,76 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     if (_selectedTab == _LibraryTab.albums && _openedAlbum != null) {
-      return _isUnknownAlbum(_openedAlbum!) ? 'Desconocido' : _openedAlbum!;
+      return _isUnknownAlbum(_openedAlbum!)
+          ? context.l10n.unknown
+          : _openedAlbum!;
     }
 
     if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null) {
-      return _isUnknownAlbum(_openedPodcast!) ? 'Desconocido' : _openedPodcast!;
+      return _isUnknownAlbum(_openedPodcast!)
+          ? context.l10n.unknown
+          : _openedPodcast!;
     }
 
     switch (_selectedTab) {
       case _LibraryTab.songs:
-        return 'Todas las canciones';
+        return context.l10n.allSongs;
 
       case _LibraryTab.podcasts:
-        return 'Tus podcasts';
+        return context.l10n.yourPodcasts;
 
       case _LibraryTab.playlists:
         return _openedPlaylistId == null
-            ? 'Tus playlists'
+            ? context.l10n.yourPlaylists
             : (_playlistService.findById(_openedPlaylistId!)?.name ??
-                  'Playlist');
+                  context.l10n.playlist);
 
       case _LibraryTab.favorites:
-        return 'Tus favoritos';
+        return context.l10n.yourFavorites;
 
       case _LibraryTab.artists:
-        return 'Tus artistas';
+        return context.l10n.yourArtists;
 
       case _LibraryTab.albums:
-        return 'Tus álbumes';
+        return context.l10n.yourAlbums;
     }
   }
 
   String _sectionSubtitle(List<Song> songs) {
     if (_selectedTab == _LibraryTab.artists && _openedArtist != null) {
-      return '${songs.length} canciones de este artista';
+      return context.l10n.nSongsFromArtist(songs.length);
     }
 
     if (_selectedTab == _LibraryTab.albums && _openedAlbum != null) {
-      return '${songs.length} canciones de este álbum';
+      return context.l10n.nSongsFromAlbum(songs.length);
     }
 
     if (_selectedTab == _LibraryTab.podcasts && _openedPodcast != null) {
-      return '${songs.length} episodios de este podcast';
+      return context.l10n.nEpisodesFromPodcast(songs.length);
     }
 
     switch (_selectedTab) {
       case _LibraryTab.songs:
-        return '${_scanner.songCount} canciones en tu colección';
+        return context.l10n.nSongsInCollection(_scanner.songCount);
 
       case _LibraryTab.podcasts:
-        return '${songs.length} podcasts en tu colección';
+        return context.l10n.nPodcastsInCollection(songs.length);
 
       case _LibraryTab.playlists:
         return _openedPlaylistId == null
-            ? '${_playlistService.playlists.length} playlists en tu colección'
-            : '${songs.length} canciones disponibles';
+            ? context.l10n.nPlaylistsInCollection(
+                _playlistService.playlists.length,
+              )
+            : context.l10n.nSongsAvailable(songs.length);
 
       case _LibraryTab.favorites:
-        return '${songs.length} elementos favoritos';
+        return context.l10n.nFavoriteItems(songs.length);
 
       case _LibraryTab.artists:
-        return '${songs.length} artistas en tu colección';
+        return context.l10n.nArtistsInCollection(songs.length);
 
       case _LibraryTab.albums:
-        return '${songs.length} álbumes en tu colección';
+        return context.l10n.nAlbumsInCollection(songs.length);
     }
   }
 
@@ -934,7 +962,7 @@ class LibraryScreenState extends State<LibraryScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'TU COLECCIÓN',
+          context.l10n.yourCollection,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
@@ -945,7 +973,7 @@ class LibraryScreenState extends State<LibraryScreen>
         ),
         SizedBox(height: isCompact ? 8 : 10),
         Text(
-          'Tu biblioteca',
+          context.l10n.yourLibrary,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style:
@@ -960,7 +988,7 @@ class LibraryScreenState extends State<LibraryScreen>
         ),
         SizedBox(height: isCompact ? 6 : 8),
         Text(
-          'Toda tu música y tus podcasts, organizados en un solo lugar.',
+          context.l10n.libraryDescription,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -975,8 +1003,10 @@ class LibraryScreenState extends State<LibraryScreen>
           children: [
             Text(
               _scanner.lastScan == null
-                  ? 'Escaneo pendiente'
-                  : 'Último escaneo: ${_formatLastScan(_scanner.lastScan!)}',
+                  ? context.l10n.scanPending
+                  : context.l10n.lastScanAt(
+                      _formatLastScan(_scanner.lastScan!),
+                    ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: AppTheme.textSecondary,
               ),
@@ -984,7 +1014,7 @@ class LibraryScreenState extends State<LibraryScreen>
             OutlinedButton.icon(
               onPressed: _scanner.isScanning ? null : _scanner.scan,
               icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Escanear ahora'),
+              label: Text(context.l10n.scanNow),
               style: OutlinedButton.styleFrom(
                 visualDensity: isCompact ? VisualDensity.compact : null,
                 padding: isCompact
@@ -1000,15 +1030,17 @@ class LibraryScreenState extends State<LibraryScreen>
 
   String _formatLastScan(DateTime date) {
     final local = date.toLocal();
+    final isEs = context.l10n.locale.languageCode.toLowerCase().startsWith(
+      'es',
+    );
 
-    final datePart =
-        '${local.day.toString().padLeft(2, '0')}/'
-        '${local.month.toString().padLeft(2, '0')}/'
-        '${local.year}';
+    final two = (int value) => value.toString().padLeft(2, '0');
 
-    final timePart =
-        '${local.hour.toString().padLeft(2, '0')}:'
-        '${local.minute.toString().padLeft(2, '0')}';
+    final datePart = isEs
+        ? '${two(local.day)}/${two(local.month)}/${local.year}'
+        : '${two(local.month)}/${two(local.day)}/${local.year}';
+
+    final timePart = '${two(local.hour)}:${two(local.minute)}';
 
     return '$datePart $timePart';
   }
@@ -1020,18 +1052,20 @@ class LibraryScreenState extends State<LibraryScreen>
       _LayoutSize.expanded => 36.0,
     };
 
+    final tabs = _buildTabsData(context);
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: EdgeInsets.symmetric(horizontal: horizontal),
       physics: const BouncingScrollPhysics(),
       child: Row(
         children: [
-          for (int i = 0; i < _tabs.length; i++) ...[
+          for (int i = 0; i < tabs.length; i++) ...[
             if (i > 0) const SizedBox(width: 8),
             _LibraryTabButton(
-              data: _tabs[i],
-              selected: _selectedTab == _tabs[i].tab,
-              onTap: () => _selectTab(_tabs[i].tab),
+              data: tabs[i],
+              selected: _selectedTab == tabs[i].tab,
+              onTap: () => _selectTab(tabs[i].tab),
             ),
           ],
         ],
@@ -1069,8 +1103,8 @@ class LibraryScreenState extends State<LibraryScreen>
         IconButton(
           style: buttonStyle,
           tooltip: _reorderingFavorites
-              ? 'Terminar de ordenar'
-              : 'Reordenar favoritos',
+              ? context.l10n.finishReordering
+              : context.l10n.reorderFavorites,
           onPressed: () {
             setState(() => _reorderingFavorites = !_reorderingFavorites);
           },
@@ -1081,7 +1115,7 @@ class LibraryScreenState extends State<LibraryScreen>
       if (_selectedTab == _LibraryTab.playlists && _openedPlaylistId != null)
         IconButton(
           style: buttonStyle,
-          tooltip: 'Terminar de ordenar',
+          tooltip: context.l10n.finishReordering,
           onPressed: () =>
               setState(() => _reorderingPlaylist = !_reorderingPlaylist),
           icon: Icon(
@@ -1106,7 +1140,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  tooltip: 'Reanudar',
+                  tooltip: context.l10n.resume,
                   onPressed: () => _resumePodcastEpisode(episode, songs),
                   icon: const Icon(Icons.play_arrow_rounded, size: 22),
                 ),
@@ -1127,7 +1161,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 ),
                 onPressed: () => _resumePodcastEpisode(episode, songs),
                 icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                label: const Text('Reanudar'),
+                label: Text(context.l10n.resume),
               ),
             );
           },
@@ -1135,13 +1169,13 @@ class LibraryScreenState extends State<LibraryScreen>
       if (showPlaybackButtons) ...[
         IconButton.filledTonal(
           style: buttonStyle,
-          tooltip: 'Agregar a la cola',
+          tooltip: context.l10n.addToQueue,
           onPressed: () => _addSongsToQueue(songs),
           icon: const Icon(Icons.queue_music_rounded),
         ),
         IconButton.filled(
           style: buttonStyle,
-          tooltip: 'Reproducir todo',
+          tooltip: context.l10n.playAll,
           onPressed: () => _playSongs(songs),
           icon: const Icon(Icons.play_arrow_rounded),
         ),
@@ -1149,7 +1183,7 @@ class LibraryScreenState extends State<LibraryScreen>
       if (_selectedTab == _LibraryTab.playlists && _openedPlaylistId == null)
         IconButton(
           style: buttonStyle,
-          tooltip: 'Añadir playlist',
+          tooltip: context.l10n.addPlaylist,
           onPressed: _showPlaylistAddMenu,
           icon: const Icon(Icons.add_rounded),
         ),
@@ -1233,7 +1267,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _ViewModeButton(
             icon: Icons.view_list_rounded,
             selected: !isGrid,
-            tooltip: 'Vista de lista',
+            tooltip: context.l10n.listView,
             size: size,
             onTap: () {
               if (isGrid) _toggleGridMode();
@@ -1242,7 +1276,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _ViewModeButton(
             icon: Icons.grid_view_rounded,
             selected: isGrid,
-            tooltip: 'Vista de cuadrícula',
+            tooltip: context.l10n.gridView,
             size: size,
             onTap: () {
               if (!isGrid) _toggleGridMode();
@@ -1282,17 +1316,17 @@ class LibraryScreenState extends State<LibraryScreen>
               children: [
                 ListTile(
                   leading: const Icon(Icons.playlist_add_rounded),
-                  title: const Text('Crear playlist'),
+                  title: Text(context.l10n.createPlaylist),
                   onTap: () => Navigator.pop(sheetContext, 'create'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.file_open_rounded),
-                  title: const Text('Importar playlist'),
+                  title: Text(context.l10n.importPlaylist),
                   onTap: () => Navigator.pop(sheetContext, 'import'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.close_rounded),
-                  title: const Text('Cancelar'),
+                  title: Text(context.l10n.cancel),
                   onTap: () => Navigator.pop(sheetContext, 'cancel'),
                 ),
               ],
@@ -1315,9 +1349,9 @@ class LibraryScreenState extends State<LibraryScreen>
     final name = await showPlaylistNameSheet(
       context,
       icon: Icons.queue_music_rounded,
-      title: 'Nueva playlist',
-      subtitle: 'Ponle un nombre para empezar a organizar tu música.',
-      confirmLabel: 'Crear',
+      title: context.l10n.newPlaylist,
+      subtitle: context.l10n.newPlaylistSubtitle,
+      confirmLabel: context.l10n.create,
       badgeIcon: Icons.add_rounded,
     );
 
@@ -1340,7 +1374,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<void> _importPlaylist() async {
     try {
       final result = await FilePicker.pickFiles(
-        dialogTitle: 'Importar playlist',
+        dialogTitle: context.l10n.importPlaylist,
         type: FileType.custom,
         allowedExtensions: [PlaylistService.extension.replaceFirst('.', '')],
       );
@@ -1378,9 +1412,9 @@ class LibraryScreenState extends State<LibraryScreen>
     final name = await showPlaylistNameSheet(
       context,
       icon: Icons.queue_music_rounded,
-      title: 'Renombrar playlist',
-      subtitle: 'Elige un nuevo nombre para "${playlist.name}".',
-      confirmLabel: 'Guardar',
+      title: context.l10n.renamePlaylist,
+      subtitle: context.l10n.renamePlaylistSubtitle(playlist.name),
+      confirmLabel: context.l10n.save,
       initialName: playlist.name,
       songs: songs,
       badgeIcon: Icons.edit_rounded,
@@ -1402,7 +1436,7 @@ class LibraryScreenState extends State<LibraryScreen>
       final bytes = Uint8List.fromList(utf8.encode(content));
 
       final output = await FilePicker.saveFile(
-        dialogTitle: 'Exportar playlist',
+        dialogTitle: context.l10n.exportPlaylist,
         fileName: fileName,
         type: FileType.custom,
         allowedExtensions: [PlaylistService.extension.replaceFirst('.', '')],
@@ -1512,7 +1546,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
                   // Título
                   Text(
-                    'Eliminar playlist',
+                    context.l10n.deletePlaylist,
                     textAlign: TextAlign.center,
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
@@ -1536,7 +1570,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
                   // Metadata
                   Text(
-                    '${playlist.songCount} ${playlist.songCount == 1 ? "canción" : "canciones"}',
+                    context.l10n.nSongs(playlist.songCount),
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppTheme.textSecondary,
@@ -1569,8 +1603,7 @@ class LibraryScreenState extends State<LibraryScreen>
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Los archivos de música no se eliminarán, '
-                            'solo la playlist. Esta acción no se puede deshacer.',
+                            context.l10n.deletePlaylistWarning,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: AppTheme.textSecondary,
                               height: 1.45,
@@ -1598,7 +1631,7 @@ class LibraryScreenState extends State<LibraryScreen>
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          child: const Text('Cancelar'),
+                          child: Text(context.l10n.cancel),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -1617,7 +1650,7 @@ class LibraryScreenState extends State<LibraryScreen>
                             Icons.delete_outline_rounded,
                             size: 18,
                           ),
-                          label: const Text('Eliminar'),
+                          label: Text(context.l10n.delete),
                         ),
                       ),
                     ],
@@ -1652,7 +1685,7 @@ class LibraryScreenState extends State<LibraryScreen>
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text('Añadir canciones a ${playlist.name}'),
+          title: Text(context.l10n.addSongsToPlaylist(playlist.name)),
           content: LayoutBuilder(
             builder: (context, constraints) {
               final isCompact = constraints.maxWidth < 420;
@@ -1668,10 +1701,8 @@ class LibraryScreenState extends State<LibraryScreen>
                 width: width,
                 height: height,
                 child: librarySongs.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No hay canciones disponibles en la biblioteca.',
-                        ),
+                    ? Center(
+                        child: Text(context.l10n.noSongsAvailableInLibrary),
                       )
                     : ListView.builder(
                         itemCount: librarySongs.length,
@@ -1712,7 +1743,7 @@ class LibraryScreenState extends State<LibraryScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancelar'),
+              child: Text(context.l10n.cancel),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(
@@ -1721,7 +1752,7 @@ class LibraryScreenState extends State<LibraryScreen>
                     .where((song) => selected.contains(song.filePath))
                     .toList(),
               ),
-              child: const Text('Añadir seleccionadas'),
+              child: Text(context.l10n.addSelected),
             ),
           ],
         ),
@@ -1735,7 +1766,7 @@ class LibraryScreenState extends State<LibraryScreen>
     child: FilledButton.icon(
       onPressed: () => _showAddSongsDialog(playlist),
       icon: const Icon(Icons.playlist_add_rounded),
-      label: const Text('Añadir canciones'),
+      label: Text(context.l10n.addSongs),
     ),
   );
 
@@ -1862,7 +1893,7 @@ class LibraryScreenState extends State<LibraryScreen>
                                 ],
                               ),
                               Text(
-                                '${playlist.songCount} canciones',
+                                context.l10n.nSongs(playlist.songCount),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.bodySmall
@@ -1939,7 +1970,7 @@ class LibraryScreenState extends State<LibraryScreen>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '${playlist.songCount} canciones',
+                                  context.l10n.nSongs(playlist.songCount),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context).textTheme.bodySmall
@@ -2015,7 +2046,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Widget _playlistMenu(Playlist playlist) {
     return IconButton(
-      tooltip: 'Opciones de playlist',
+      tooltip: context.l10n.playlistOptions,
       icon: const Icon(Icons.more_horiz_rounded),
       color: AppTheme.textSecondary,
       iconSize: 22,
@@ -2037,12 +2068,12 @@ class LibraryScreenState extends State<LibraryScreen>
                   children: [
                     ListTile(
                       leading: const Icon(Icons.edit_outlined),
-                      title: const Text('Renombrar'),
+                      title: Text(context.l10n.rename),
                       onTap: () => Navigator.pop(sheetContext, 'rename'),
                     ),
                     ListTile(
                       leading: const Icon(Icons.ios_share_rounded),
-                      title: const Text('Exportar'),
+                      title: Text(context.l10n.export),
                       onTap: () => Navigator.pop(sheetContext, 'export'),
                     ),
                     ListTile(
@@ -2051,7 +2082,7 @@ class LibraryScreenState extends State<LibraryScreen>
                         color: Theme.of(sheetContext).colorScheme.error,
                       ),
                       title: Text(
-                        'Eliminar',
+                        context.l10n.delete,
                         style: TextStyle(
                           color: Theme.of(sheetContext).colorScheme.error,
                         ),
@@ -2060,7 +2091,7 @@ class LibraryScreenState extends State<LibraryScreen>
                     ),
                     ListTile(
                       leading: const Icon(Icons.close_rounded),
-                      title: const Text('Cancelar'),
+                      title: Text(context.l10n.cancel),
                       onTap: () => Navigator.pop(sheetContext, 'cancel'),
                     ),
                   ],
@@ -2188,7 +2219,7 @@ class LibraryScreenState extends State<LibraryScreen>
             child: Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
-                '$missingCount canciones no disponibles en la biblioteca. Sus rutas se conservarán en la playlist.',
+                context.l10n.missingSongsInPlaylist(missingCount),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
@@ -2212,8 +2243,8 @@ class LibraryScreenState extends State<LibraryScreen>
       if (_playlistService.playlists.isEmpty) {
         return _emptyState(
           icon: Icons.queue_music_rounded,
-          title: 'Todavía no hay playlists',
-          message: 'Crea o importa una playlist para organizar tus canciones.',
+          title: context.l10n.noPlaylistsYet,
+          message: context.l10n.noPlaylistsMessage,
         );
       }
       return _buildPlaylistsCollection(isDesktop, layout);
@@ -2223,15 +2254,14 @@ class LibraryScreenState extends State<LibraryScreen>
       if (playlist == null)
         return _emptyState(
           icon: Icons.queue_music_rounded,
-          title: 'Playlist no disponible',
-          message: 'La playlist pudo haber sido eliminada.',
+          title: context.l10n.playlistNotAvailable,
+          message: context.l10n.playlistNotAvailableMessage,
         );
       if (songs.isEmpty)
         return _emptyState(
           icon: Icons.queue_music_rounded,
-          title: 'Esta playlist está vacía',
-          message:
-              'Añade canciones con el botón de añadir canciones de arriba.',
+          title: context.l10n.emptyPlaylistMessage,
+          message: context.l10n.emptyPlaylistAddSongsHint,
         );
       return _buildPlaylistSongList(playlist, songs, isDesktop, layout);
     }
@@ -2261,26 +2291,26 @@ class LibraryScreenState extends State<LibraryScreen>
             : Icons.music_off_rounded,
 
         title: podcasts && !podcastDetail
-            ? 'Todavía no hay podcasts'
+            ? context.l10n.noPodcastsYet
             : podcastDetail
-            ? 'No hay episodios de este podcast'
+            ? context.l10n.noPodcastEpisodes
             : favorites
-            ? 'Todavía no tienes favoritos'
+            ? context.l10n.noFavoritesYet
             : artistDetail
-            ? 'No hay canciones de este artista'
+            ? context.l10n.noSongsFromArtist
             : albumDetail
-            ? 'No hay canciones de este álbum'
-            : 'Tu biblioteca está vacía',
+            ? context.l10n.noSongsFromAlbum
+            : context.l10n.libraryEmpty,
 
         message: podcasts && !podcastDetail
-            ? 'Agrega directorios en Configuración > Biblioteca > Podcasts y escanea tus archivos.'
+            ? context.l10n.noPodcastsMessage
             : podcastDetail
-            ? 'Los episodios aparecerán aquí cuando estén disponibles en tu biblioteca.'
+            ? context.l10n.noPodcastEpisodesMessage
             : favorites
-            ? 'Marca canciones o episodios como favoritos para verlos aquí.'
+            ? context.l10n.markFavoritesOrEpisodes
             : artistDetail || albumDetail
-            ? 'Las canciones aparecerán aquí cuando estén disponibles en tu biblioteca.'
-            : 'Agrega directorios en Configuración > Biblioteca y escanea tus archivos.',
+            ? context.l10n.songsWillAppearHere
+            : context.l10n.libraryEmptyMessage,
       );
     }
 
@@ -2484,8 +2514,10 @@ class LibraryScreenState extends State<LibraryScreen>
           final song = songs[index];
 
           final title = isArtist
-              ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
-              : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
+              ? (song.artist.isEmpty ? context.l10n.unknown : song.artist)
+              : (_isUnknownAlbum(song.album)
+                    ? context.l10n.unknown
+                    : song.album);
 
           return _entry(
             index,
@@ -2601,8 +2633,10 @@ class LibraryScreenState extends State<LibraryScreen>
               final song = songs[index];
 
               final title = isArtist
-                  ? (song.artist.isEmpty ? 'Desconocido' : song.artist)
-                  : (_isUnknownAlbum(song.album) ? 'Desconocido' : song.album);
+                  ? (song.artist.isEmpty ? context.l10n.unknown : song.artist)
+                  : (_isUnknownAlbum(song.album)
+                        ? context.l10n.unknown
+                        : song.album);
 
               return _entry(
                 index,

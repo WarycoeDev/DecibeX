@@ -10,6 +10,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../../core/services/library_scanner.dart';
 
 import '../app_theme.dart';
+import '../../l10n/app_localizations.dart';
 
 class YouTubeScreen extends StatefulWidget {
   const YouTubeScreen({super.key});
@@ -253,7 +254,7 @@ class _YouTubeScreenState extends State<YouTubeScreen>
         textInputAction: TextInputAction.search,
         onSubmitted: _search,
         decoration: InputDecoration(
-          hintText: 'Buscar en YouTube...',
+          hintText: context.l10n.searchYoutubeHint,
           hintStyle: TextStyle(color: AppTheme.textSecondary),
           prefixIcon: Icon(Icons.search_rounded, color: AppTheme.accent),
           suffixIcon: _searchController.text.isEmpty
@@ -279,7 +280,7 @@ class _YouTubeScreenState extends State<YouTubeScreen>
                     Icons.close_rounded,
                     color: AppTheme.textSecondary,
                   ),
-                  tooltip: 'Borrar',
+                  tooltip: context.l10n.clear,
                 ),
           filled: true,
           fillColor: AppTheme.surfaceVariant.withValues(alpha: 0.35),
@@ -509,7 +510,7 @@ class _YouTubeScreenState extends State<YouTubeScreen>
                                 : () => _showDownloadMenu(video),
                             icon: const Icon(Icons.more_horiz_rounded),
                             color: AppTheme.textSecondary,
-                            tooltip: 'Descargar',
+                            tooltip: context.l10n.download,
                           ),
                         ],
                       ),
@@ -1019,12 +1020,14 @@ class _DownloadConfigDialogState extends State<_DownloadConfigDialog> {
                 const SizedBox(height: 8),
                 _optionTile(
                   icon: Icons.folder_outlined,
-                  title: _directory.isEmpty ? 'Elegir carpeta' : _directory,
-                  subtitle: 'Seleccionar ubicación',
+                  title: _directory.isEmpty
+                      ? context.l10n.chooseFolder
+                      : _directory,
+                  subtitle: context.l10n.selectLocation,
                   showCheck: false,
                   onTap: () async {
                     final picked = await FilePicker.getDirectoryPath(
-                      dialogTitle: 'Elegir carpeta de descarga',
+                      dialogTitle: context.l10n.downloadFolder,
                       initialDirectory: _directory.isEmpty ? null : _directory,
                     );
 

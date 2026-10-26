@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../app_theme.dart';
 import '../../core/services/replay_gain_service.dart';
 import '../../core/services/settings_service.dart';
+import '../../l10n/app_localizations.dart';
 
 enum _LayoutSize { compact, medium, expanded }
 
@@ -23,13 +24,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const String _settingsFileName = 'settings.decibex';
 
   static const List<_AccentOption> _accentOptions = [
-    _AccentOption('Violeta', Color(0xFF6750A4)),
-    _AccentOption('Azul', Color(0xFF4285F4)),
-    _AccentOption('Cian', Color(0xFF00A6B2)),
-    _AccentOption('Verde', Color(0xFF40916C)),
-    _AccentOption('Naranja', Color(0xFFE58A35)),
-    _AccentOption('Rosa', Color(0xFFD65D91)),
-    _AccentOption('Rojo', Color(0xFFD94848)),
+    _AccentOption('accentViolet', Color(0xFF6750A4)),
+    _AccentOption('accentBlue', Color(0xFF4285F4)),
+    _AccentOption('accentCyan', Color(0xFF00A6B2)),
+    _AccentOption('accentGreen', Color(0xFF40916C)),
+    _AccentOption('accentOrange', Color(0xFFE58A35)),
+    _AccentOption('accentPink', Color(0xFFD65D91)),
+    _AccentOption('accentRed', Color(0xFFD94848)),
   ];
 
   bool _isLoading = true;
@@ -41,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _darkTheme = AppTheme.defaultDarkTheme;
   int _accentColorValue = 0xFF6750A4;
+  AppLanguage _language = AppLanguage.system;
 
   bool _replayGainEnabled = false;
   double _replayGainPreamp = 0;
@@ -81,7 +83,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _replayGainEnabled != s.replayGainEnabled ||
         _replayGainPreamp != s.replayGainPreamp ||
         _darkTheme != s.darkTheme ||
-        _accentColorValue != s.accentColorValue;
+        _accentColorValue != s.accentColorValue ||
+        _language != s.language;
 
     if (!needsUpdate) return;
 
@@ -90,6 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _accentColorValue = s.accentColorValue;
       _replayGainEnabled = s.replayGainEnabled;
       _replayGainPreamp = s.replayGainPreamp;
+      _language = s.language; // [NUEVO] sincroniza el dropdown
     });
   }
 
@@ -131,6 +135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _storagePath = s.storagePath;
       _darkTheme = s.darkTheme;
       _accentColorValue = s.accentColorValue;
+      _language = s.language;
       _replayGainEnabled = s.replayGainEnabled;
       _replayGainPreamp = s.replayGainPreamp;
       _fadeInEnabled = s.fadeInEnabled;
@@ -171,6 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final s = SettingsService.instance;
         s.darkTheme = _darkTheme;
         s.accentColorValue = _accentColorValue;
+        s.language = _language;
         s.replayGainEnabled = _replayGainEnabled;
         s.replayGainPreamp = _replayGainPreamp;
         s.fadeInEnabled = _fadeInEnabled;
@@ -183,6 +189,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         s.artistsGridMode = _artistsGridMode;
         s.albumsGridMode = _albumsGridMode;
 
+        s.notifyListeners();
+
         await s.save();
 
         _storagePath = s.storagePath;
@@ -192,9 +200,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _storageError = error.toString();
 
       if (showError && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudieron guardar los ajustes.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.settingsSaveError)));
       }
     } finally {
       _isSaving = false;
@@ -222,8 +230,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final selectedDirectory = await FilePicker.getDirectoryPath(
         dialogTitle: podcasts
-            ? 'Seleccionar directorio de podcasts'
-            : 'Seleccionar directorio de música',
+            ? context.l10n.selectPodcastDirectoryDialog
+            : context.l10n.selectMusicDirectoryDialog,
       );
 
       if (selectedDirectory == null || !mounted) return;
@@ -235,8 +243,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SnackBar(
             content: Text(
               podcasts
-                  ? 'Este directorio de podcasts ya está agregado.'
-                  : 'Este directorio de música ya está agregado.',
+                  ? context.l10n.directoryAlreadyAddedPodcast
+                  : context.l10n.directoryAlreadyAddedMusic,
             ),
           ),
         );
@@ -255,8 +263,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         SnackBar(
           content: Text(
             podcasts
-                ? 'No se pudo seleccionar el directorio de podcasts: $error'
-                : 'No se pudo seleccionar el directorio de música: $error',
+                ? context.l10n.directoryPickErrorPodcast(error)
+                : context.l10n.directoryPickErrorMusic(error),
           ),
         ),
       );
@@ -282,19 +290,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Restablecer configuración'),
-        content: const Text(
-          'Se restaurarán los valores predeterminados de DecibeX. '
-          'Los directorios de música y podcasts también se eliminarán de sus listas.',
-        ),
+        title: Text(context.l10n.settingsResetTitle),
+        content: Text(context.l10n.settingsResetMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Restablecer'),
+            child: Text(context.l10n.settingsResetConfirm),
           ),
         ],
       ),
@@ -305,6 +310,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _darkTheme = AppTheme.defaultDarkTheme;
       _accentColorValue = AppTheme.defaultAccent.toARGB32();
+      _language = AppLanguage.system;
 
       _replayGainEnabled = false;
       _replayGainPreamp = 0;
@@ -322,6 +328,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _albumsGridMode = false;
     });
 
+    SettingsService.instance.setLanguage(AppLanguage.system);
+
     AppTheme.updateAppearance(darkTheme: _darkTheme, accentColor: _accentColor);
 
     await _saveSettings();
@@ -331,9 +339,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // HELPERS DE UI — contenedor tipo bottom sheet premium
   // ===========================================================================
 
-  /// Contenedor reutilizable que replica el estilo del selector de playlists:
-  /// margen 12, radio 24, borde `surfaceVariant` 0.7, sombra elevada y
-  /// altura máxima del 82 % de la pantalla.
   Widget _buildSheetContainer({
     required BuildContext context,
     required Widget child,
@@ -364,7 +369,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Handle superior (drag indicator) reutilizable.
   Widget _buildSheetHandle() {
     return Padding(
       padding: const EdgeInsets.only(top: 14),
@@ -422,8 +426,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(height: isCompact ? 22 : 30),
                     _buildSectionTitle(
                       icon: Icons.palette_outlined,
-                      title: 'Apariencia',
-                      subtitle: 'Personaliza el aspecto de DecibeX.',
+                      title: context.l10n.settingsAppearanceTitle,
+                      subtitle: context.l10n.settingsAppearanceSubtitle,
                       layout: layout,
                     ),
                     SizedBox(height: isCompact ? 10 : 14),
@@ -431,8 +435,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(height: isCompact ? 22 : 30),
                     _buildSectionTitle(
                       icon: Icons.graphic_eq_rounded,
-                      title: 'Audio',
-                      subtitle: 'Preferencias de reproducción y sonido.',
+                      title: context.l10n.settingsAudioTitle,
+                      subtitle: context.l10n.settingsAudioSubtitle,
                       layout: layout,
                     ),
                     SizedBox(height: isCompact ? 10 : 14),
@@ -440,8 +444,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(height: isCompact ? 22 : 30),
                     _buildSectionTitle(
                       icon: Icons.folder_open_rounded,
-                      title: 'Biblioteca',
-                      subtitle: 'Configura las carpetas de música y podcasts.',
+                      title: context.l10n.settingsLibraryTitle,
+                      subtitle: context.l10n.settingsLibrarySubtitle,
                       layout: layout,
                     ),
                     SizedBox(height: isCompact ? 10 : 14),
@@ -449,8 +453,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(height: isCompact ? 22 : 30),
                     _buildSectionTitle(
                       icon: Icons.info_outline_rounded,
-                      title: 'Acerca de DecibeX',
-                      subtitle: 'Información y estado de la configuración.',
+                      title: context.l10n.settingsAboutTitle,
+                      subtitle: context.l10n.settingsAboutSubtitle,
                       layout: layout,
                     ),
                     SizedBox(height: isCompact ? 10 : 14),
@@ -460,13 +464,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: TextButton.icon(
                         onPressed: _resetSettings,
                         icon: const Icon(Icons.restart_alt_rounded),
-                        label: const Text('Restablecer configuración'),
+                        label: Text(context.l10n.resetSettings),
                       ),
                     ),
                     const SizedBox(height: 8),
                     Center(
                       child: Text(
-                        'DecibeX · Configuración local',
+                        context.l10n.localConfiguration,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: AppTheme.textSecondary,
                         ),
@@ -490,7 +494,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'PERSONALIZACIÓN',
+          context.l10n.personalization,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
@@ -501,7 +505,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         SizedBox(height: isCompact ? 8 : 10),
         Text(
-          'Configuración',
+          context.l10n.configuration,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style:
@@ -516,7 +520,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         SizedBox(height: isCompact ? 6 : 8),
         Text(
-          'Ajusta tu experiencia de escucha a tu manera.',
+          context.l10n.listeningDescription,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -600,12 +604,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return _buildCard(
       children: [
+        _LanguageTile(
+          value: _language,
+          onChanged: (value) {
+            SettingsService.instance.setLanguage(value);
+            _updateSetting(() {
+              _language = value;
+            });
+          },
+        ),
+        _buildDivider(),
         _SettingSwitchTile(
           icon: Icons.dark_mode_outlined,
-          title: 'Tema oscuro',
+          title: context.l10n.darkTheme,
           subtitle: _darkTheme
-              ? 'La interfaz está configurada en oscuro.'
-              : 'La interfaz está configurada en claro.',
+              ? context.l10n.darkThemeOn
+              : context.l10n.darkThemeOff,
           value: _darkTheme,
           accent: _accentColor,
           onChanged: (value) {
@@ -620,10 +634,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _SettingHeading(
+              _SettingHeading(
                 icon: Icons.color_lens_outlined,
-                title: 'Color de acento',
-                subtitle: 'Selecciona el color principal de la interfaz.',
+                title: context.l10n.accentColor,
+                subtitle: context.l10n.accentColorSubtitle,
               ),
               SizedBox(height: isCompact ? 14 : 18),
               Wrap(
@@ -632,7 +646,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   for (final option in _accentOptions)
                     Tooltip(
-                      message: option.name,
+                      message: context.l10n.get(option.nameKey),
                       child: InkWell(
                         onTap: () {
                           _updateAppearance(() {
@@ -675,15 +689,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                _accentOptions
-                    .firstWhere(
-                      (option) => option.color.toARGB32() == _accentColorValue,
-                      orElse: () => const _AccentOption(
-                        'Personalizado',
-                        Color(0xFF6750A4),
-                      ),
-                    )
-                    .name,
+                context.l10n.get(
+                  _accentOptions
+                      .firstWhere(
+                        (option) =>
+                            option.color.toARGB32() == _accentColorValue,
+                        orElse: () => const _AccentOption(
+                          'accentCustom',
+                          Color(0xFF6750A4),
+                        ),
+                      )
+                      .nameKey,
+                ),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
@@ -700,8 +717,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         _SettingSwitchTile(
           icon: Icons.equalizer_rounded,
-          title: 'ReplayGain',
-          subtitle: 'Normalización del volumen entre canciones.',
+          title: context.l10n.replayGainTitle,
+          subtitle: context.l10n.replayGainSubtitle,
           value: _replayGainEnabled,
           accent: _accentColor,
           onChanged: (value) {
@@ -716,8 +733,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
           child: _SettingSlider(
             icon: Icons.volume_up_rounded,
-            title: 'ReplayGain preamp',
-            subtitle: 'Se suma a la ganancia de cada pista.',
+            title: context.l10n.replayGainPreampTitle,
+            subtitle: context.l10n.replayGainPreampSubtitle,
             value: _replayGainPreamp,
             min: -12,
             max: 12,
@@ -727,7 +744,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 '${_replayGainPreamp >= 0 ? "+" : ""}'
                 '${_replayGainPreamp.toStringAsFixed(1)} dB',
             enabled: true,
-            // showRangeLabels por defecto = true → muestra -12 dB / +12 dB
             onChanged: (value) {
               setState(() {
                 _replayGainPreamp = value;
@@ -742,8 +758,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _buildDivider(),
         _SettingSwitchTile(
           icon: Icons.trending_up_rounded,
-          title: 'Fade in',
-          subtitle: 'Aumenta gradualmente el volumen al iniciar.',
+          title: context.l10n.fadeInTitle,
+          subtitle: context.l10n.fadeInSubtitle,
           value: _fadeInEnabled,
           accent: _accentColor,
           onChanged: (value) {
@@ -756,8 +772,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
           child: _SettingSlider(
             icon: Icons.timer_outlined,
-            title: 'Duración del fade in',
-            subtitle: 'Tiempo de entrada gradual.',
+            title: context.l10n.fadeInDurationTitle,
+            subtitle: context.l10n.fadeInDurationSubtitle,
             value: _fadeInDuration,
             min: 0,
             max: 10,
@@ -776,8 +792,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _buildDivider(),
         _SettingSwitchTile(
           icon: Icons.trending_down_rounded,
-          title: 'Fade out',
-          subtitle: 'Reduce gradualmente el volumen al finalizar.',
+          title: context.l10n.fadeOutTitle,
+          subtitle: context.l10n.fadeOutSubtitle,
           value: _fadeOutEnabled,
           accent: _accentColor,
           onChanged: (value) {
@@ -790,8 +806,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
           child: _SettingSlider(
             icon: Icons.timer_outlined,
-            title: 'Duración del fade out',
-            subtitle: 'Tiempo de salida gradual.',
+            title: context.l10n.fadeOutDurationTitle,
+            subtitle: context.l10n.fadeOutDurationSubtitle,
             value: _fadeOutDuration,
             min: 0,
             max: 10,
@@ -840,13 +856,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Calcular ReplayGain por archivo',
+                          context.l10n.replayGainAnalyzerTitle,
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          'Analiza cada pista y guarda su ganancia en la biblioteca.',
+                          context.l10n.replayGainAnalyzerSubtitle,
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: AppTheme.textSecondary,
@@ -878,7 +894,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ? null
                           : () => _showAnalyzeDialog(),
                       icon: const Icon(Icons.play_arrow_rounded),
-                      label: const Text('Analizar pendientes'),
+                      label: Text(context.l10n.replayGainAnalyzeButton),
                       style: FilledButton.styleFrom(
                         backgroundColor: _accentColor,
                         foregroundColor: Colors.white,
@@ -893,7 +909,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(width: 8),
                   IconButton(
-                    tooltip: 'Reanalizar toda la biblioteca',
+                    tooltip: context.l10n.replayGainReanalyzeTooltip,
                     onPressed: (running || !_replayGainEnabled || kIsWeb)
                         ? null
                         : () => _confirmReanalyze(),
@@ -901,7 +917,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: _accentColor,
                   ),
                   IconButton(
-                    tooltip: 'Borrar ganancias calculadas',
+                    tooltip: context.l10n.replayGainClearTooltip,
                     onPressed: (running || !_replayGainEnabled || kIsWeb)
                         ? null
                         : () => _confirmClearReplayGain(),
@@ -918,14 +934,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ===========================================================================
-  // DIÁLOGO: ANALIZAR PENDIENTES (con estado "no hay pistas nuevas")
+  // DIÁLOGO: ANALIZAR PENDIENTES
   // ===========================================================================
 
   Future<void> _showAnalyzeDialog() async {
     final service = ReplayGainService.instance;
 
-    // Lanza el análisis antes de mostrar el diálogo para que el
-    // estado "running" esté disponible de inmediato.
     final future = service.analyzeLibrary();
 
     await showModalBottomSheet<void>(
@@ -941,6 +955,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             animation: service,
             builder: (context, _) {
               final theme = Theme.of(context);
+              final l10n = context.l10n;
               final total = service.total;
               final processed = service.processed;
               final running = service.isRunning;
@@ -948,9 +963,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final progress = total == 0 ? 0.0 : processed / total;
               final percent = (progress * 100).clamp(0, 100).toStringAsFixed(0);
 
-              // [NUEVO] Estado "sin pistas pendientes":
-              // - O bien el servicio ya no corre y total == 0 (terminó al instante).
-              // - O bien no había pendientes desde el inicio.
               final noPending = finished && total == 0;
 
               return _buildSheetContainer(
@@ -1040,10 +1052,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               children: [
                                 Text(
                                   running
-                                      ? 'Calculando ReplayGain'
+                                      ? l10n.replayGainCalculating
                                       : noPending
-                                      ? 'No hay pistas nuevas'
-                                      : 'ReplayGain completado',
+                                      ? l10n.replayGainNoPending
+                                      : l10n.replayGainCompleted,
                                   style: theme.textTheme.titleLarge?.copyWith(
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: -0.3,
@@ -1052,10 +1064,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const SizedBox(height: 6),
                                 Text(
                                   running
-                                      ? 'Analizando $processed de $total…'
+                                      ? l10n.get(
+                                          'replayGainAnalyzingProgress',
+                                          {
+                                            'processed': processed,
+                                            'total': total,
+                                          },
+                                        )
                                       : noPending
-                                      ? 'Todas las pistas ya tienen su ganancia.'
-                                      : 'Análisis finalizado.',
+                                      ? l10n.replayGainNoPendingSubtitle
+                                      : l10n.replayGainCompletedSubtitle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.bodyMedium?.copyWith(
@@ -1065,10 +1083,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const SizedBox(height: 2),
                                 Text(
                                   running
-                                      ? 'Normalización de volumen por pista'
+                                      ? l10n.replayGainNormalizationPerTrack
                                       : noPending
-                                      ? 'No se ha analizado ninguna pista nueva.'
-                                      : 'Ganancias guardadas en la biblioteca',
+                                      ? l10n.replayGainNoPendingInfo
+                                      : l10n.replayGainGainsSaved,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.bodySmall?.copyWith(
@@ -1083,7 +1101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ? null
                                 : () => Navigator.pop(sheetContext),
                             icon: const Icon(Icons.close_rounded),
-                            tooltip: 'Cerrar',
+                            tooltip: l10n.close,
                             visualDensity: VisualDensity.compact,
                             color: AppTheme.textSecondary,
                           ),
@@ -1092,8 +1110,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 18),
 
-                    // [NUEVO] Si no hay pendientes, mostramos solo una
-                    // caja informativa en lugar del subheader + barra.
                     if (noPending)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
@@ -1118,8 +1134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  'Usa el botón de reanalizar si quieres volver '
-                                  'a calcular las ganancias de toda la biblioteca.',
+                                  l10n.replayGainNoPendingInfo,
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: AppTheme.textSecondary,
                                     height: 1.4,
@@ -1138,7 +1153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Expanded(
                               child: Text(
-                                'Progreso del análisis',
+                                l10n.replayGainProgressTitle,
                                 style: theme.textTheme.titleSmall?.copyWith(
                                   color: AppTheme.textSecondary,
                                   fontWeight: FontWeight.w600,
@@ -1160,7 +1175,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               child: Text(
                                 running
                                     ? '$percent %'
-                                    : (finished ? 'Listo' : '$percent %'),
+                                    : (finished
+                                          ? l10n.replayGainReady
+                                          : '$percent %'),
                                 style: theme.textTheme.labelMedium?.copyWith(
                                   color: (running || percent != '0')
                                       ? _accentColor
@@ -1194,15 +1211,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               children: [
                                 Text(
                                   running
-                                      ? '$processed / $total pistas'
-                                      : '$total pistas procesadas',
+                                      ? l10n.get('replayGainTracksFormat', {
+                                          'processed': processed,
+                                          'total': total,
+                                        })
+                                      : l10n.get('replayGainTracksProcessed', {
+                                          'total': total,
+                                        }),
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: AppTheme.textSecondary,
                                   ),
                                 ),
                                 Text(
                                   percent == '100' || finished
-                                      ? 'Completado'
+                                      ? l10n.replayGainCompletedShort
                                       : '$percent %',
                                   style: theme.textTheme.labelMedium?.copyWith(
                                     color: _accentColor,
@@ -1281,7 +1303,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                               ),
-                              child: Text(running ? 'En curso…' : 'Cerrar'),
+                              child: Text(
+                                running
+                                    ? l10n.replayGainInProgress
+                                    : l10n.close,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -1311,7 +1337,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     : Icons.check_rounded,
                                 size: 18,
                               ),
-                              label: Text(running ? 'Detener' : 'Aceptar'),
+                              label: Text(
+                                running ? l10n.replayGainStop : l10n.accept,
+                              ),
                             ),
                           ),
                         ],
@@ -1326,7 +1354,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
 
-    // Espera a que el análisis termine de verdad antes de salir.
     await future;
   }
 
@@ -1341,6 +1368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       isScrollControlled: true,
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
+        final l10n = sheetContext.l10n;
 
         return _buildSheetContainer(
           context: sheetContext,
@@ -1412,7 +1440,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Reanalizar biblioteca',
+                            l10n.replayGainReanalyzeTitle,
                             style: theme.textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.bold,
                               letterSpacing: -0.3,
@@ -1420,7 +1448,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Se recalcularán todas las ganancias.',
+                            l10n.replayGainReanalyzeSubtitle,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium?.copyWith(
@@ -1429,7 +1457,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Puede tardar bastante según el tamaño de tu biblioteca.',
+                            l10n.replayGainReanalyzeWarning,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -1442,7 +1470,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     IconButton(
                       onPressed: () => Navigator.pop(sheetContext, false),
                       icon: const Icon(Icons.close_rounded),
-                      tooltip: 'Cerrar',
+                      tooltip: l10n.close,
                       visualDensity: VisualDensity.compact,
                       color: AppTheme.textSecondary,
                     ),
@@ -1475,8 +1503,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Las ganancias actuales se sobrescribirán con los '
-                          'nuevos valores calculados.',
+                          l10n.replayGainReanalyzeInfo,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: AppTheme.textSecondary,
                             height: 1.4,
@@ -1506,7 +1533,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        child: const Text('Cancelar'),
+                        child: Text(l10n.cancel),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1522,7 +1549,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: const Text('Reanalizar'),
+                        label: Text(l10n.replayGainReanalyzeButton),
                       ),
                     ),
                   ],
@@ -1550,6 +1577,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       isScrollControlled: true,
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
+        final l10n = sheetContext.l10n;
 
         return _buildSheetContainer(
           context: sheetContext,
@@ -1625,7 +1653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Borrar ganancias',
+                            l10n.replayGainClearTitle,
                             style: theme.textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.bold,
                               letterSpacing: -0.3,
@@ -1633,7 +1661,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Se eliminarán todas las ganancias calculadas.',
+                            l10n.replayGainClearSubtitle,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodyMedium?.copyWith(
@@ -1642,7 +1670,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Las pistas volverán a sonar sin normalización.',
+                            l10n.replayGainClearWarning,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -1655,7 +1683,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     IconButton(
                       onPressed: () => Navigator.pop(sheetContext, false),
                       icon: const Icon(Icons.close_rounded),
-                      tooltip: 'Cerrar',
+                      tooltip: l10n.close,
                       visualDensity: VisualDensity.compact,
                       color: AppTheme.textSecondary,
                     ),
@@ -1688,8 +1716,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Esta acción no se puede deshacer. Deberás analizar '
-                          'de nuevo cada pista para recuperar la normalización.',
+                          l10n.replayGainClearInfo,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: AppTheme.textSecondary,
                             height: 1.4,
@@ -1719,7 +1746,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        child: const Text('Cancelar'),
+                        child: Text(l10n.cancel),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1738,7 +1765,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Icons.delete_outline_rounded,
                           size: 18,
                         ),
-                        label: const Text('Borrar'),
+                        label: Text(l10n.replayGainClearButton),
                       ),
                     ),
                   ],
@@ -1760,8 +1787,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         _SettingSwitchTile(
           icon: Icons.account_tree_outlined,
-          title: 'Incluir subdirectorios',
-          subtitle: 'Buscar música también dentro de las subcarpetas.',
+          title: context.l10n.includeSubdirectoriesTitle,
+          subtitle: context.l10n.includeSubdirectoriesSubtitle,
           value: _scanSubdirectories,
           accent: _accentColor,
           onChanged: (value) {
@@ -1772,9 +1799,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         _buildDivider(),
         _buildDirectorySection(
-          title: 'Directorios de música',
-          subtitle:
-              'Carpetas que se incluirán al escanear la biblioteca musical.',
+          title: context.l10n.musicDirectoriesTitle,
+          subtitle: context.l10n.musicDirectoriesSubtitle,
           icon: Icons.library_music_outlined,
           directories: _scanDirectories,
           podcasts: false,
@@ -1782,9 +1808,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         _buildDivider(),
         _buildDirectorySection(
-          title: 'Directorios de podcasts',
-          subtitle:
-              'Carpetas independientes para almacenar y localizar podcasts.',
+          title: context.l10n.podcastDirectoriesTitle,
+          subtitle: context.l10n.podcastDirectoriesSubtitle,
           icon: Icons.podcasts_rounded,
           directories: _podcastDirectories,
           podcasts: true,
@@ -1827,8 +1852,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               IconButton.filledTonal(
                 onPressed: () => _addDirectory(podcasts: podcasts),
                 tooltip: podcasts
-                    ? 'Agregar directorio de podcasts'
-                    : 'Agregar directorio de música',
+                    ? context.l10n.addPodcastDirectoryTooltip
+                    : context.l10n.addMusicDirectoryTooltip,
                 icon: const Icon(Icons.add_rounded),
                 style: IconButton.styleFrom(foregroundColor: _accentColor),
               ),
@@ -1850,7 +1875,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               trailing: IconButton(
-                tooltip: 'Eliminar directorio',
+                tooltip: context.l10n.removeDirectoryTooltip,
                 onPressed: () =>
                     _removeDirectory(directories[i], podcasts: podcasts),
                 icon: const Icon(Icons.close_rounded),
@@ -1876,8 +1901,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 10),
                   Text(
                     podcasts
-                        ? 'No hay directorios de podcasts'
-                        : 'No hay directorios de música',
+                        ? context.l10n.noPodcastDirectories
+                        : context.l10n.noMusicDirectories,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -1886,8 +1911,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 5),
                   Text(
                     podcasts
-                        ? 'Agrega una carpeta para configurar tus podcasts.'
-                        : 'Agrega una carpeta para configurar tu biblioteca musical.',
+                        ? context.l10n.noPodcastDirectoriesHint
+                        : context.l10n.noMusicDirectoriesHint,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppTheme.textSecondary,
@@ -1929,7 +1954,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'DecibeX',
+                      context.l10n.aboutAppName,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                         letterSpacing: -0.3,
@@ -1937,7 +1962,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Reproductor de música y podcasts',
+                      context.l10n.aboutAppTagline,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppTheme.textSecondary,
                       ),
@@ -1953,7 +1978,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         borderRadius: BorderRadius.circular(50),
                       ),
                       child: Text(
-                        'Versión 1.0.0',
+                        context.l10n.aboutVersion,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: _accentColor,
                           fontWeight: FontWeight.w600,
@@ -1972,9 +1997,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
           child: Text(
-            'DecibeX es un reproductor local enfocado en la calidad de audio, '
-            'con soporte para ReplayGain, fades de volumen y organización '
-            'de tu biblioteca musical y de podcasts.',
+            context.l10n.aboutDescription,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: AppTheme.textSecondary,
               height: 1.5,
@@ -1989,12 +2012,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             vertical: 4,
           ),
           leading: Icon(Icons.description_outlined, color: _accentColor),
-          title: const Text('Licencias de terceros'),
-          subtitle: const Text('Paquetes y recursos utilizados'),
+          title: Text(context.l10n.aboutLicenses),
+          subtitle: Text(context.l10n.aboutLicensesSubtitle),
           trailing: const Icon(Icons.chevron_right_rounded, size: 20),
           onTap: () => showLicensePage(
             context: context,
-            applicationName: 'DecibeX',
+            applicationName: context.l10n.aboutAppName,
             applicationVersion: '1.0.0',
             applicationIcon: Padding(
               padding: const EdgeInsets.all(8),
@@ -2015,7 +2038,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Hecho con Flutter',
+                context.l10n.aboutMadeWithFlutter,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: AppTheme.textSecondary,
                   fontWeight: FontWeight.w600,
@@ -2023,7 +2046,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                '© ${DateTime.now().year} DecibeX. Todos los derechos reservados.',
+                context.l10n.get('aboutCopyright', {
+                  'year': DateTime.now().year,
+                }),
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
@@ -2040,11 +2065,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
+class _LanguageTile extends StatelessWidget {
+  final AppLanguage value;
+  final ValueChanged<AppLanguage> onChanged;
+
+  const _LanguageTile({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 5),
+      leading: Icon(Icons.language_rounded, color: AppTheme.accent),
+      title: Text(context.l10n.language),
+      subtitle: Text(_label(context, value)),
+      trailing: DropdownButton<AppLanguage>(
+        value: value,
+        underline: const SizedBox.shrink(),
+        onChanged: (value) {
+          if (value == null) return;
+          onChanged(value);
+        },
+        items: [
+          DropdownMenuItem(
+            value: AppLanguage.system,
+            child: Text(context.l10n.systemLanguage),
+          ),
+          DropdownMenuItem(
+            value: AppLanguage.spanish,
+            child: Text(context.l10n.spanish),
+          ),
+          DropdownMenuItem(
+            value: AppLanguage.english,
+            child: Text(context.l10n.english),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _label(BuildContext context, AppLanguage value) {
+    switch (value) {
+      case AppLanguage.system:
+        return context.l10n.systemLanguage;
+      case AppLanguage.spanish:
+        return context.l10n.spanish;
+      case AppLanguage.english:
+        return context.l10n.english;
+    }
+  }
+}
+
 class _AccentOption {
-  final String name;
+  final String nameKey;
   final Color color;
 
-  const _AccentOption(this.name, this.color);
+  const _AccentOption(this.nameKey, this.color);
 }
 
 class _SettingHeading extends StatelessWidget {
