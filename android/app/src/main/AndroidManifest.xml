@@ -10,7 +10,7 @@
 
     <application
         android:extractNativeLibs="true"
-        android:label="decibex"
+        android:label="DecibeX"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
