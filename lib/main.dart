@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:universal_youtube_player/universal_youtube_player.dart';
 
 import 'app_shell.dart';
 import 'ui/app_theme.dart';
@@ -14,17 +16,55 @@ import 'core/services/settings_service.dart';
 import 'core/services/statistics_service.dart';
 import 'core/services/podcast_statistics_service.dart';
 import 'core/services/audio_handler.dart';
-import 'package:universal_youtube_player/universal_youtube_player.dart';
+
+/// Plugin para notificaciones locales.
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+/// Inicializa las notificaciones locales de Android.
+Future<void> _initializeLocalNotifications() async {
+  const androidSettings = AndroidInitializationSettings(
+    'ic_stat_notification_icon',
+  );
+
+  const initializationSettings = InitializationSettings(
+    android: androidSettings,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(
+    settings: initializationSettings,
+  );
+}
 
 Future<void> main() async {
-  // Captura errores de la zona raíz para ver el stack trace real en consola.
   runZonedGuarded<Future<void>>(
     () async {
-      // Toda la inicialización y runApp deben compartir la misma zona.
       WidgetsFlutterBinding.ensureInitialized();
+
       UniversalYoutubePlayerBootstrap.ensureInitialized();
       JustAudioMediaKit.ensureInitialized();
 
+      FlutterError.onError = (details) {
+        FlutterError.presentError(details);
+        debugPrint('[FlutterError] ${details.exceptionAsString()}');
+        debugPrint('${details.stack}');
+      };
+
+      // Inicializa notificaciones locales sin impedir que la app arranque
+      // si ocurre un problema con este servicio.
+      if (Platform.isAndroid) {
+        try {
+          await _initializeLocalNotifications();
+        } catch (e, st) {
+          debugPrint('[main] Local notifications init error: $e\n$st');
+        }
+
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+      }
+
+      // Conserva el servicio de reproducción de audio existente.
       await AudioService.init(
         builder: DecibeXAudioHandler.new,
         config: AudioServiceConfig(
@@ -33,27 +73,13 @@ Future<void> main() async {
           androidNotificationChannelDescription:
               'Controles de reproducción de DecibeX',
           androidNotificationOngoing: true,
-          // Una notificación ongoing requiere que el servicio permanezca en
-          // foreground también cuando la reproducción está pausada.
           androidStopForegroundOnPause: true,
           artDownscaleWidth: 512,
           artDownscaleHeight: 512,
+
+          androidNotificationIcon: 'drawable/ic_stat_notification_icon',
         ),
       );
-
-      FlutterError.onError = (details) {
-        FlutterError.presentError(details);
-        debugPrint('[FlutterError] ${details.exceptionAsString()}');
-        debugPrint('${details.stack}');
-      };
-
-      JustAudioMediaKit.ensureInitialized();
-
-      if (Platform.isAndroid) {
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-        ]);
-      }
 
       runApp(const DecibeXApp());
     },
@@ -75,18 +101,14 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
   bool _permissionRequested = false;
   bool _servicesInitialized = false;
 
-  // Últimos valores aplicados a AppTheme, para no reaplicar en cada build.
   bool? _appliedDarkTheme;
   int? _appliedAccentColor;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
 
-    // Sincroniza AppTheme cuando SettingsService cambie (una sola vez por
-    // cambio real), NO dentro de build(). Esto evita el bucle
-    // notifyListeners → rebuild → updateAppearance → notifyListeners.
+    WidgetsBinding.instance.addObserver(this);
     SettingsService.instance.addListener(_onSettingsChanged);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -102,7 +124,6 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// Aplica el tema a AppTheme solo si cambió respecto al último aplicado.
   void _applyThemeFromSettings() {
     final s = SettingsService.instance;
     final accent = s.accentColorValue;
@@ -129,21 +150,18 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
     if (_servicesInitialized) return;
     _servicesInitialized = true;
 
-    // 1) Settings. Si falla, seguimos con defaults.
     try {
       await SettingsService.instance.initialize();
     } catch (e, st) {
       debugPrint('[main] SettingsService init error: $e\n$st');
     }
 
-    // Aplicar el tema cargado (o defaults si falló).
     try {
       _applyThemeFromSettings();
     } catch (e, st) {
       debugPrint('[main] AppTheme update error: $e\n$st');
     }
 
-    // 2) Estadísticas.
     try {
       await StatisticsService.instance.init();
     } catch (e, st) {
@@ -156,8 +174,6 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
       debugPrint('[main] PodcastStatisticsService init error: $e\n$st');
     }
 
-    // 3) Biblioteca. Si falla (p. ej. permisos aún no concedidos), se
-    // reintenta al volver del lifecycle "resumed".
     try {
       await LibraryScanner.instance.initialize();
     } catch (e, st) {
@@ -176,8 +192,6 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
       if (!status.isGranted) {
         final result = await Permission.manageExternalStorage.request();
 
-        // Si el usuario acaba de conceder el permiso, reintentar la
-        // inicialización del escáner (antes falló por no poder leer).
         if (result.isGranted && !_scannerInitialized()) {
           try {
             await LibraryScanner.instance.initialize();
@@ -192,7 +206,6 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
     }
   }
 
-  /// Heurística: si lastScan es null, aún no terminó la inicialización.
   bool _scannerInitialized() => LibraryScanner.instance.lastScan != null;
 
   @override
@@ -236,8 +249,6 @@ class _DecibeXAppState extends State<DecibeXApp> with WidgetsBindingObserver {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.current,
           home: const AppShell(),
-          // Evita el flash rojo si un widget lanza excepción en el primer
-          // frame y muestra la app igualmente. Hombre soy bien barbaro jeje
           builder: (context, widget) {
             return widget ?? const SizedBox.shrink();
           },

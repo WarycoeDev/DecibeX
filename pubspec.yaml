@@ -24,11 +24,13 @@ dependencies:
   extractor: ^1.0.0
   universal_youtube_player: ^0.1.0
   shared_preferences: ^2.2.0
+  flutter_local_notifications: ^22.3.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 
 flutter:
@@ -45,3 +47,8 @@ flutter:
           weight: 600
         - asset: assets/fonts/quicksand/Quicksand-Bold.ttf
           weight: 700
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
