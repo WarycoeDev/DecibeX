@@ -1,7 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:extractor/extractor.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../app_theme.dart';
 import '../../core/models/song.dart';
@@ -10,7 +15,7 @@ import '../../core/services/playback_queue.dart';
 import '../../core/services/playback_service.dart';
 import '../library/song_list_tile.dart';
 
-enum _SearchFilter { all, songs, artists, albums, podcasts }
+enum _SearchFilter { all, songs, artists, albums, podcasts, youtube }
 
 enum _LayoutSize { compact, medium, expanded }
 
@@ -54,6 +59,12 @@ class _SearchScreenState extends State<SearchScreen>
       'Podcasts',
       Icons.podcasts_rounded,
     ),
+    // [NUEVO] Filtro de YouTube integrado.
+    _SearchFilterData(
+      _SearchFilter.youtube,
+      'YouTube',
+      Icons.play_circle_outline_rounded,
+    ),
   ];
 
   final LibraryScanner _scanner = LibraryScanner.instance;
@@ -69,6 +80,19 @@ class _SearchScreenState extends State<SearchScreen>
   /// Caché de resultados por combinación (query normalizada, filtro).
   final Map<String, List<Song>> _songsCache = {};
   final Map<String, List<Song>> _groupedCache = {};
+
+  // ---------------------------------------------------------------------------
+  // [NUEVO] Estado de YouTube integrado
+  // ---------------------------------------------------------------------------
+  final YoutubeExplode _yt = YoutubeExplode();
+  final YoutubeDLFlutter _downloader = YoutubeDLFlutter.instance;
+
+  List<Video> _ytResults = [];
+  VideoSearchList? _ytSearchList;
+  bool _ytLoading = false;
+  bool _ytLoadingMore = false;
+  bool _ytDownloading = false;
+  String? _ytQuery;
 
   @override
   void initState() {
@@ -97,6 +121,7 @@ class _SearchScreenState extends State<SearchScreen>
     _controller.dispose();
     _focusNode.dispose();
     _scrollController.dispose();
+    _yt.close();
     super.dispose();
   }
 
@@ -123,7 +148,7 @@ class _SearchScreenState extends State<SearchScreen>
       value.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 
   // ---------------------------------------------------------------
-  // Búsqueda difusa
+  // Búsqueda difusa (biblioteca local)
   // ---------------------------------------------------------------
 
   String _normalizeFuzzy(String value) {
@@ -295,7 +320,7 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   // ---------------------------------------------------------------
-  // Resultados
+  // Resultados de biblioteca local
   // ---------------------------------------------------------------
 
   Iterable<Song> _sourceForFilter(_SearchFilter filter) {
@@ -305,6 +330,7 @@ class _SearchScreenState extends State<SearchScreen>
       case _SearchFilter.podcasts:
         return _scanner.podcasts;
       case _SearchFilter.all:
+      case _SearchFilter.youtube:
         return _scanner.songs;
       case _SearchFilter.artists:
       case _SearchFilter.albums:
@@ -390,27 +416,219 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   // ---------------------------------------------------------------
+  // [NUEVO] Búsqueda y descarga de YouTube
+  // ---------------------------------------------------------------
+
+  Future<void> _ytSearch(String rawQuery) async {
+    final trimmed = rawQuery.trim();
+    if (trimmed.isEmpty) return;
+
+    _focusNode.unfocus();
+
+    setState(() {
+      _ytLoading = true;
+      _ytResults = [];
+      _ytSearchList = null;
+      _ytQuery = trimmed;
+    });
+
+    try {
+      final searchList = await _yt.search.search(trimmed);
+      if (!mounted) return;
+
+      setState(() {
+        _ytSearchList = searchList;
+        _ytResults = searchList.take(20).toList();
+        _ytLoading = false;
+      });
+
+      _entryController.forward(from: 0);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _ytLoading = false);
+      _message('Error al buscar en YouTube: $error');
+    }
+  }
+
+  Future<void> _ytLoadMore() async {
+    if (_ytSearchList == null || _ytLoadingMore || _ytLoading) return;
+
+    setState(() => _ytLoadingMore = true);
+
+    try {
+      final nextPage = await _ytSearchList!.nextPage();
+      if (!mounted) return;
+
+      if (nextPage == null) {
+        _message('No hay más resultados.');
+        setState(() => _ytLoadingMore = false);
+        return;
+      }
+
+      _ytSearchList = nextPage;
+
+      setState(() {
+        _ytResults.addAll(nextPage.take(20));
+        _ytLoadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _ytLoadingMore = false);
+      _message('Error al cargar más: $error');
+    }
+  }
+
+  void _ytClear() {
+    setState(() {
+      _ytResults = [];
+      _ytSearchList = null;
+      _ytQuery = null;
+      _ytLoading = false;
+      _ytLoadingMore = false;
+    });
+  }
+
+  Future<String> _ytResolveInitialDirectory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('youtube_download_directory');
+      if (saved != null && saved.isNotEmpty) {
+        return saved;
+      }
+    } catch (_) {}
+
+    try {
+      final downloads = await getDownloadsDirectory();
+      final fallback = await getExternalStorageDirectory();
+      return (downloads ?? fallback)?.path ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _ytPersistDirectory(String directory) async {
+    if (directory.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('youtube_download_directory', directory);
+    } catch (_) {}
+  }
+
+  Future<void> _ytShowDownloadMenu(Video video) async {
+    if (_ytDownloading) return;
+
+    final directory = await _ytResolveInitialDirectory();
+    if (!mounted) return;
+
+    setState(() => _ytDownloading = true);
+
+    try {
+      final request = await showDialog<_YouTubeDownloadRequest>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return _YouTubeDownloadConfigDialog(
+            video: video,
+            initialDirectory: directory,
+            onError: _message,
+          );
+        },
+      );
+
+      if (request == null || !mounted) return;
+
+      await _ytPersistDirectory(request.directory);
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return _YouTubeDownloadProgressDialog(
+            video: video,
+            request: request,
+            downloader: _downloader,
+            onError: _message,
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _ytDownloading = false);
+      }
+    }
+  }
+
+  String _formatYtDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    final two = (int value) => value.toString().padLeft(2, '0');
+
+    if (hours > 0) {
+      return '$hours:${two(minutes)}:${two(seconds)}';
+    }
+    return '$minutes:${two(seconds)}';
+  }
+
+  void _message(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // ---------------------------------------------------------------
   // Acciones de UI
   // ---------------------------------------------------------------
 
   void _onQueryChanged(String value) {
     _invalidateCache();
     setState(() => _query = value);
+
+    // Si estamos en modo YouTube, la búsqueda es online (submit).
+    if (_selectedFilter == _SearchFilter.youtube) {
+      // Limpiamos resultados anteriores para evitar mezclar búsquedas.
+      if (value.isEmpty) {
+        _ytClear();
+      }
+      return;
+    }
+
     _entryController.forward(from: 0);
   }
 
   void _clearQuery() {
     _controller.clear();
-    // 🔧 FIX: al borrar sí pedimos foco intencionadamente (acción del usuario),
-    // así que aquí se mantiene el requestFocus.
     _focusNode.requestFocus();
     _onQueryChanged('');
+
+    if (_selectedFilter == _SearchFilter.youtube) {
+      _ytClear();
+    }
   }
 
   void _selectFilter(_SearchFilter filter) {
     if (filter == _selectedFilter) return;
     _invalidateCache();
-    setState(() => _selectedFilter = filter);
+
+    setState(() {
+      _selectedFilter = filter;
+      // Al cambiar a/desde YouTube, limpiamos la búsqueda online si es necesario.
+      if (filter != _SearchFilter.youtube) {
+        _ytResults = [];
+        _ytSearchList = null;
+        _ytQuery = null;
+        _ytLoading = false;
+        _ytLoadingMore = false;
+      }
+    });
+
     _entryController.forward(from: 0);
   }
 
@@ -453,6 +671,7 @@ class _SearchScreenState extends State<SearchScreen>
             final layout = _layoutFor(constraints.maxWidth);
             final isDesktop = layout == _LayoutSize.expanded;
             final isCompact = layout == _LayoutSize.compact;
+            final isYouTubeMode = _selectedFilter == _SearchFilter.youtube;
 
             final horizontal = switch (layout) {
               _LayoutSize.compact => 16.0,
@@ -481,7 +700,7 @@ class _SearchScreenState extends State<SearchScreen>
                           0,
                         ),
                         sliver: SliverToBoxAdapter(
-                          child: _buildHeader(context, layout),
+                          child: _buildHeader(context, layout, isYouTubeMode),
                         ),
                       ),
                       SliverPadding(
@@ -492,7 +711,7 @@ class _SearchScreenState extends State<SearchScreen>
                           0,
                         ),
                         sliver: SliverToBoxAdapter(
-                          child: _buildSearchField(layout),
+                          child: _buildSearchField(layout, isYouTubeMode),
                         ),
                       ),
                       SliverPadding(
@@ -510,7 +729,9 @@ class _SearchScreenState extends State<SearchScreen>
                           horizontal,
                           isCompact ? 24 : 36,
                         ),
-                        sliver: _buildResults(isDesktop, layout),
+                        sliver: isYouTubeMode
+                            ? _buildYouTubeResults(layout)
+                            : _buildResults(isDesktop, layout),
                       ),
                     ],
                   ),
@@ -523,7 +744,11 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildHeader(BuildContext context, _LayoutSize layout) {
+  Widget _buildHeader(
+    BuildContext context,
+    _LayoutSize layout,
+    bool isYouTubeMode,
+  ) {
     final theme = Theme.of(context);
     final isDesktop = layout == _LayoutSize.expanded;
     final isCompact = layout == _LayoutSize.compact;
@@ -532,7 +757,7 @@ class _SearchScreenState extends State<SearchScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'ENCUENTRA TU MÚSICA',
+          isYouTubeMode ? 'BUSCAR EN YOUTUBE' : 'ENCUENTRA TU MÚSICA',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
@@ -543,7 +768,7 @@ class _SearchScreenState extends State<SearchScreen>
         ),
         SizedBox(height: isCompact ? 8 : 10),
         Text(
-          'Buscar',
+          isYouTubeMode ? 'Explora y descarga' : 'Buscar',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style:
@@ -558,7 +783,9 @@ class _SearchScreenState extends State<SearchScreen>
         ),
         SizedBox(height: isCompact ? 6 : 8),
         Text(
-          'Explora toda tu colección por canción, artista, álbum o podcast.',
+          isYouTubeMode
+              ? 'Busca videos o audio de YouTube y elige el formato de descarga.'
+              : 'Explora toda tu colección por canción, artista, álbum o podcast.',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -569,7 +796,7 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildSearchField(_LayoutSize layout) {
+  Widget _buildSearchField(_LayoutSize layout, bool isYouTubeMode) {
     final theme = Theme.of(context);
     final hasQuery = _query.isNotEmpty;
     final isCompact = layout == _LayoutSize.compact;
@@ -580,21 +807,25 @@ class _SearchScreenState extends State<SearchScreen>
         return TextField(
           controller: _controller,
           focusNode: _focusNode,
-          // 🔧 FIX: nunca autofocus. El teclado solo debe abrirse al tocar.
           autofocus: false,
           textInputAction: TextInputAction.search,
           onChanged: _onQueryChanged,
+          onSubmitted: isYouTubeMode ? (v) => _ytSearch(v) : null,
           style: theme.textTheme.bodyLarge?.copyWith(
             fontWeight: FontWeight.w500,
           ),
           cursorColor: AppTheme.accent,
           decoration: InputDecoration(
-            hintText: 'Canciones, artistas, álbumes o podcasts',
+            hintText: isYouTubeMode
+                ? 'Buscar en YouTube...'
+                : 'Canciones, artistas, álbumes o podcasts',
             hintStyle: theme.textTheme.bodyLarge?.copyWith(
               color: AppTheme.textSecondary,
             ),
             prefixIcon: Icon(
-              Icons.search_rounded,
+              isYouTubeMode
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.search_rounded,
               color: hasQuery ? AppTheme.accent : AppTheme.textSecondary,
             ),
             suffixIcon: hasQuery
@@ -603,7 +834,16 @@ class _SearchScreenState extends State<SearchScreen>
                     icon: const Icon(Icons.close_rounded, size: 20),
                     onPressed: _clearQuery,
                   )
-                : null,
+                : (isYouTubeMode
+                      ? IconButton(
+                          tooltip: 'Buscar en YouTube',
+                          icon: const Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 20,
+                          ),
+                          onPressed: () => _ytSearch(_controller.text),
+                        )
+                      : null),
             filled: true,
             fillColor: AppTheme.surface,
             contentPadding: EdgeInsets.symmetric(
@@ -674,6 +914,197 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
+  // ---------------------------------------------------------------
+  // [NUEVO] Resultados de YouTube
+  // ---------------------------------------------------------------
+
+  Widget _buildYouTubeResults(_LayoutSize layout) {
+    final isCompact = layout == _LayoutSize.compact;
+    final isDesktop = layout == _LayoutSize.expanded;
+
+    if (_ytLoading) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.all(48),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    if (_ytQuery == null || _ytResults.isEmpty) {
+      final hasQuery = _ytQuery != null;
+      return SliverToBoxAdapter(
+        child: _entry(
+          0,
+          _EmptySearchState(
+            icon: hasQuery
+                ? Icons.search_off_rounded
+                : Icons.play_circle_outline_rounded,
+            title: hasQuery ? 'Sin resultados' : 'Buscar en YouTube',
+            message: hasQuery
+                ? 'Prueba con otras palabras.'
+                : 'Escribe algo y pulsa Enter para buscar videos o audio en YouTube.',
+          ),
+          layout,
+        ),
+      );
+    }
+
+    return DecoratedSliver(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            if (index == _ytResults.length) {
+              return Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isDesktop ? 20 : 12,
+                  vertical: 16,
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _ytLoadingMore ? null : _ytLoadMore,
+                    icon: _ytLoadingMore
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.expand_more_rounded),
+                    label: Text(
+                      _ytLoadingMore ? 'Cargando…' : 'Buscar más resultados',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.accent,
+                      side: BorderSide(color: AppTheme.accent),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            final video = _ytResults[index];
+            return _entry(
+              index,
+              RepaintBoundary(
+                child: Column(
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _ytDownloading
+                            ? null
+                            : () => _ytShowDownloadMenu(video),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isDesktop ? 20 : 12,
+                            vertical: isDesktop ? 12 : 10,
+                          ),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(11),
+                                child: SizedBox(
+                                  width: isDesktop ? 140 : 120,
+                                  height: isDesktop ? 79 : 68,
+                                  child: Image.network(
+                                    video.thumbnails.highResUrl,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => ColoredBox(
+                                      color: AppTheme.surfaceVariant,
+                                      child: Icon(
+                                        Icons.video_library_rounded,
+                                        color: AppTheme.accent,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      video.title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      video.author,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                    ),
+                                    if (video.duration != null)
+                                      Text(
+                                        _formatYtDuration(video.duration!),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              color: AppTheme.textSecondary,
+                                            ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: _ytDownloading
+                                    ? null
+                                    : () => _ytShowDownloadMenu(video),
+                                icon: const Icon(Icons.more_horiz_rounded),
+                                color: AppTheme.textSecondary,
+                                tooltip: 'Descargar',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (index != _ytResults.length - 1)
+                      Divider(
+                        height: 1,
+                        thickness: 0.7,
+                        indent: isDesktop ? 20 : 12,
+                        endIndent: isDesktop ? 20 : 12,
+                        color: AppTheme.surfaceVariant,
+                      ),
+                  ],
+                ),
+              ),
+              layout,
+            );
+          },
+          childCount: _ytResults.length + 1,
+          addAutomaticKeepAlives: false,
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------
+  // Resultados de biblioteca
+  // ---------------------------------------------------------------
+
   Widget _buildResults(bool isDesktop, _LayoutSize layout) {
     if (_query.isEmpty) {
       return SliverToBoxAdapter(
@@ -737,6 +1168,10 @@ class _SearchScreenState extends State<SearchScreen>
           emptyTitle: 'Sin podcasts',
           emptyMessage: 'Ningún podcast coincide con "$_query".',
         );
+
+      case _SearchFilter.youtube:
+        // No debería llegar aquí (se gestiona antes), pero por seguridad.
+        return _buildYouTubeResults(layout);
     }
   }
 
@@ -1073,8 +1508,6 @@ class _SearchScreenState extends State<SearchScreen>
           File(artworkPath),
           fit: BoxFit.cover,
           alignment: Alignment.center,
-          // Solo limitamos el ancho; el alto se calcula
-          // proporcionalmente para no deformar la imagen.
           cacheWidth: cacheSize,
           filterQuality: FilterQuality.low,
           errorBuilder: (context, error, stackTrace) => placeholder(),
@@ -1299,5 +1732,1086 @@ class _EntryTransitionState extends State<_EntryTransition> {
         },
       ),
     );
+  }
+}
+
+// -----------------------------------------------------------------
+// [NUEVO] Diálogos de descarga de YouTube (adaptados del screen original)
+// -----------------------------------------------------------------
+
+class _YouTubeDownloadRequest {
+  final AudioFormat format;
+  final String fileName;
+  final String directory;
+  final Video video;
+
+  const _YouTubeDownloadRequest({
+    required this.format,
+    required this.fileName,
+    required this.directory,
+    required this.video,
+  });
+}
+
+enum AudioFormat {
+  mp3(
+    label: 'MP3',
+    subtitle: 'Comprimido y compatible',
+    extension: 'mp3',
+    icon: Icons.audiotrack_rounded,
+  ),
+  flac(
+    label: 'FLAC',
+    subtitle: 'Audio sin pérdida',
+    extension: 'flac',
+    icon: Icons.graphic_eq_rounded,
+  ),
+  wav(
+    label: 'WAV',
+    subtitle: 'Audio sin comprimir',
+    extension: 'wav',
+    icon: Icons.multitrack_audio_rounded,
+  );
+
+  final String label;
+  final String subtitle;
+  final String extension;
+  final IconData icon;
+
+  const AudioFormat({
+    required this.label,
+    required this.subtitle,
+    required this.extension,
+    required this.icon,
+  });
+}
+
+/// Diálogo centrado de configuración de descarga.
+class _YouTubeDownloadConfigDialog extends StatefulWidget {
+  final Video video;
+  final String initialDirectory;
+  final void Function(String message) onError;
+
+  const _YouTubeDownloadConfigDialog({
+    required this.video,
+    required this.initialDirectory,
+    required this.onError,
+  });
+
+  @override
+  State<_YouTubeDownloadConfigDialog> createState() =>
+      _YouTubeDownloadConfigDialogState();
+}
+
+class _YouTubeDownloadConfigDialogState
+    extends State<_YouTubeDownloadConfigDialog> {
+  late final TextEditingController _nameController;
+  final FocusNode _nameFocusNode = FocusNode();
+  final GlobalKey _nameFieldKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
+  late String _directory;
+  AudioFormat? _selectedFormat;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(
+      text: _sanitizeFileName(widget.video.title),
+    );
+    _directory = widget.initialDirectory;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _nameFocusNode.unfocus();
+    });
+
+    _nameFocusNode.addListener(() {
+      if (_nameFocusNode.hasFocus) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final ctx = _nameFieldKey.currentContext;
+            if (ctx != null) {
+              Scrollable.ensureVisible(
+                ctx,
+                duration: const Duration(milliseconds: 250),
+                alignment: 0.1,
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _nameFocusNode.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  String _sanitizeFileName(String value) {
+    return value
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim()
+        .replaceAll(RegExp(r'\.+$'), '');
+  }
+
+  InputDecoration _inputDecoration(String hint, IconData icon) {
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: Icon(icon, color: AppTheme.accent),
+      filled: true,
+      fillColor: AppTheme.surfaceVariant.withValues(alpha: 0.35),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: AppTheme.accent.withValues(alpha: 0.7)),
+      ),
+    );
+  }
+
+  Widget _optionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool selected = false,
+    bool showCheck = true,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: selected
+            ? AppTheme.accent.withValues(alpha: 0.14)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: selected ? AppTheme.accent : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: selected
+                              ? AppTheme.accent
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (showCheck) ...[
+                  const SizedBox(width: 8),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: selected ? AppTheme.accent : Colors.transparent,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected
+                            ? AppTheme.accent
+                            : AppTheme.surfaceVariant,
+                        width: 1.5,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: selected
+                        ? const Icon(
+                            Icons.check_rounded,
+                            size: 15,
+                            color: Colors.white,
+                          )
+                        : null,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmDownload() {
+    if (_selectedFormat == null) return;
+
+    final fileName = _sanitizeFileName(_nameController.text);
+    if (fileName.isEmpty) {
+      widget.onError('Escribe un nombre de archivo válido.');
+      return;
+    }
+    if (_directory.isEmpty) {
+      widget.onError('Elige una carpeta de descarga.');
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+
+    Navigator.pop(
+      context,
+      _YouTubeDownloadRequest(
+        format: _selectedFormat!,
+        fileName: fileName,
+        directory: _directory,
+        video: widget.video,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mediaQuery = MediaQuery.of(context);
+
+    final availableHeight =
+        mediaQuery.size.height -
+        mediaQuery.padding.top -
+        mediaQuery.padding.bottom -
+        48;
+
+    final canDownload =
+        _selectedFormat != null &&
+        _nameController.text.trim().isNotEmpty &&
+        _directory.isNotEmpty;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 480,
+          maxHeight: availableHeight > 0 ? availableHeight : 100,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 128,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.surfaceVariant,
+                              width: 0.7,
+                            ),
+                            color: AppTheme.surfaceVariant,
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.network(
+                            widget.video.thumbnails.highResUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => ColoredBox(
+                              color: AppTheme.surfaceVariant,
+                              child: Icon(
+                                Icons.video_library_rounded,
+                                color: AppTheme.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: -6,
+                          bottom: -6,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTheme.accent,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppTheme.surface,
+                                width: 3,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.download_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Descargar',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.video.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.video.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Cerrar',
+                      visualDensity: VisualDensity.compact,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Directorio de guardado',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _optionTile(
+                  icon: Icons.folder_outlined,
+                  title: _directory.isEmpty ? 'Elegir carpeta' : _directory,
+                  subtitle: 'Seleccionar ubicación',
+                  showCheck: false,
+                  onTap: () async {
+                    final picked = await FilePicker.getDirectoryPath(
+                      dialogTitle: 'Elegir carpeta de descarga',
+                      initialDirectory: _directory.isEmpty ? null : _directory,
+                    );
+
+                    if (picked != null) {
+                      setState(() => _directory = picked);
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Nombre del archivo',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: _nameFieldKey,
+                  focusNode: _nameFocusNode,
+                  controller: _nameController,
+                  autofocus: false,
+                  onChanged: (_) => setState(() {}),
+                  decoration: _inputDecoration(
+                    'Nombre sin extensión',
+                    Icons.drive_file_rename_outline_rounded,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Formato de descarga',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final format in AudioFormat.values)
+                  _optionTile(
+                    icon: format.icon,
+                    title: format.label,
+                    subtitle: format.subtitle,
+                    selected: _selectedFormat == format,
+                    onTap: () {
+                      setState(() => _selectedFormat = format);
+                    },
+                  ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(
+                            color: AppTheme.surfaceVariant,
+                            width: 0.9,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: canDownload ? _confirmDownload : null,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.accent,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppTheme.surfaceVariant,
+                          disabledForegroundColor: AppTheme.textSecondary,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('Descargar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Diálogo de descarga: progreso, completado y error en un solo widget.
+class _YouTubeDownloadProgressDialog extends StatefulWidget {
+  final Video video;
+  final _YouTubeDownloadRequest request;
+  final YoutubeDLFlutter downloader;
+  final void Function(String message) onError;
+
+  const _YouTubeDownloadProgressDialog({
+    required this.video,
+    required this.request,
+    required this.downloader,
+    required this.onError,
+  });
+
+  @override
+  State<_YouTubeDownloadProgressDialog> createState() =>
+      _YouTubeDownloadProgressDialogState();
+}
+
+enum _DialogPhase { downloading, completed, error }
+
+class _YouTubeDownloadProgressDialogState
+    extends State<_YouTubeDownloadProgressDialog> {
+  _DialogPhase _phase = _DialogPhase.downloading;
+  double _progress = 0;
+  String _status = '';
+  bool _isInitializing = true;
+  String? _errorMessage;
+  String? _savedPath;
+
+  StreamSubscription<DownloadProgress>? _progressSubscription;
+  String? _activeProcessId;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startDownload();
+    });
+  }
+
+  @override
+  void dispose() {
+    _progressSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startDownload() async {
+    if (!Platform.isAndroid) {
+      widget.onError(
+        'La descarga con Extractor solo está habilitada en Android.',
+      );
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
+    setState(() {
+      _phase = _DialogPhase.downloading;
+      _isInitializing = true;
+      _progress = 0;
+      _status = 'Inicializando el descargador…';
+      _errorMessage = null;
+      _savedPath = null;
+    });
+
+    final directory = Directory(widget.request.directory);
+
+    try {
+      await directory.create(recursive: true);
+
+      final initResult = await widget.downloader.initialize(
+        enableFFmpeg: true,
+        enableAria2c: false,
+      );
+
+      if (!initResult.success) {
+        final errorMsg =
+            initResult.errorMessage ??
+            'No se pudo inicializar Extractor. Verifica tu conexión a internet.';
+        throw Exception(errorMsg);
+      }
+
+      if (!mounted) return;
+
+      final processId = 'decibex_${DateTime.now().microsecondsSinceEpoch}';
+      _activeProcessId = processId;
+
+      setState(() {
+        _isInitializing = false;
+        _status = 'Descargando audio…';
+      });
+
+      await _progressSubscription?.cancel();
+
+      _progressSubscription = widget.downloader.onProgress.listen((progress) {
+        if (!mounted || progress.processId != _activeProcessId) return;
+
+        setState(() {
+          _progress = progress.progress;
+          _status = 'Descargando audio…';
+        });
+      });
+
+      final outputTemplate = '${widget.request.fileName}.%(ext)s';
+
+      final downloadRequest = DownloadRequest(
+        url: 'https://www.youtube.com/watch?v=${widget.video.id}',
+        outputPath: directory.path,
+        outputTemplate: outputTemplate,
+        noPlaylist: true,
+        extractAudio: true,
+        audioFormat: widget.request.format.extension,
+        audioQuality: 0,
+        embedMetadata: false,
+        embedThumbnail: true,
+        processId: processId,
+        customOptions: {
+          '--retries': '5',
+          '--fragment-retries': '5',
+          '--no-mtime': '',
+          '--format': 'bestaudio/best',
+          '--extractor-args':
+              'youtube:player_client=android;player_skip=webpage,configs',
+        },
+      );
+
+      final result = await widget.downloader
+          .download(downloadRequest)
+          .timeout(const Duration(minutes: 15));
+
+      if (result.status != OperationStatus.success) {
+        throw Exception(
+          result.errorMessage ?? 'No se pudo descargar el audio.',
+        );
+      }
+
+      File? downloadedFile;
+
+      if (result.outputPath != null && result.outputPath!.isNotEmpty) {
+        final file = File(result.outputPath!);
+        if (await file.exists() && await file.length() > 0) {
+          downloadedFile = file;
+        }
+      }
+
+      if (downloadedFile == null) {
+        final expectedFile = File(
+          '${directory.path}${Platform.pathSeparator}'
+          '${widget.request.fileName}.${widget.request.format.extension}',
+        );
+        if (await expectedFile.exists() && await expectedFile.length() > 0) {
+          downloadedFile = expectedFile;
+        }
+      }
+
+      if (downloadedFile == null) {
+        await for (final entity in directory.list()) {
+          if (entity is File &&
+              entity.path.contains(widget.request.fileName) &&
+              await entity.length() > 0) {
+            downloadedFile = entity;
+            break;
+          }
+        }
+      }
+
+      if (downloadedFile == null) {
+        throw Exception(
+          'La descarga terminó pero no se encontró el archivo generado.',
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _progress = 100;
+        _status = 'Descarga completada';
+        _savedPath = downloadedFile!.path;
+        _phase = _DialogPhase.completed;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = '$error';
+        _phase = _DialogPhase.error;
+      });
+    } finally {
+      await _progressSubscription?.cancel();
+      _progressSubscription = null;
+      _activeProcessId = null;
+    }
+  }
+
+  bool get _isBusy => _phase == _DialogPhase.downloading;
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+
+    return PopScope(
+      canPop: !_isBusy,
+      child: AnimatedPadding(
+        padding: EdgeInsets.only(bottom: viewInsets.bottom),
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 440,
+              maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: _buildHeader(context),
+                  ),
+                  const SizedBox(height: 18),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        child: _buildBody(context),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                    child: _buildFooter(context),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+
+    final (
+      Color badgeColor,
+      IconData badgeIcon,
+      String title,
+      String subtitle,
+    ) = switch (_phase) {
+      _DialogPhase.downloading => (
+        AppTheme.accent,
+        _isInitializing ? Icons.settings_rounded : Icons.download_rounded,
+        _isInitializing ? 'Preparando descargador' : 'Descargando…',
+        _isInitializing ? 'Esto puede tardar la primera vez' : _status,
+      ),
+      _DialogPhase.completed => (
+        AppTheme.accent,
+        Icons.check_rounded,
+        'Descarga completada',
+        widget.request.format.label,
+      ),
+      _DialogPhase.error => (
+        Colors.redAccent,
+        Icons.close_rounded,
+        'No se pudo descargar',
+        'Ocurrió un error inesperado',
+      ),
+    };
+
+    return Row(
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 128,
+              height: 72,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+                color: AppTheme.surfaceVariant,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Image.network(
+                widget.video.thumbnails.highResUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => ColoredBox(
+                  color: AppTheme.surfaceVariant,
+                  child: Icon(
+                    Icons.video_library_rounded,
+                    color: AppTheme.accent,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: -6,
+              bottom: -6,
+              child: Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.surface, width: 3),
+                ),
+                child: Icon(badgeIcon, size: 14, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                widget.video.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (!_isBusy)
+          IconButton(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close_rounded),
+            tooltip: 'Cerrar',
+            visualDensity: VisualDensity.compact,
+            color: AppTheme.textSecondary,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    switch (_phase) {
+      case _DialogPhase.downloading:
+        return _buildProgressBody(context);
+      case _DialogPhase.completed:
+        return _buildCompletedBody(context);
+      case _DialogPhase.error:
+        return _buildErrorBody(context);
+    }
+  }
+
+  Widget _buildProgressBody(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasProgress = _progress > 0;
+
+    return Column(
+      key: const ValueKey('progress'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                widget.video.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+            if (hasProgress) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(50),
+                ),
+                child: Text(
+                  '${_progress.toStringAsFixed(0)}%',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: AppTheme.accent,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 14),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: hasProgress ? (_progress / 100).clamp(0.0, 1.0) : null,
+            minHeight: 8,
+            backgroundColor: AppTheme.surfaceVariant,
+            color: AppTheme.accent,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'No cierres esta ventana mientras se descarga.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: AppTheme.textSecondary,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompletedBody(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      key: const ValueKey('completed'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: AppTheme.accent, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Archivo guardado correctamente',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_savedPath != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.surfaceVariant, width: 0.7),
+            ),
+            child: Text(
+              _savedPath!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildErrorBody(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      key: const ValueKey('error'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.red.withValues(alpha: 0.35),
+              width: 0.7,
+            ),
+          ),
+          child: Text(
+            _errorMessage ?? 'Ocurrió un error inesperado.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFooter(BuildContext context) {
+    switch (_phase) {
+      case _DialogPhase.downloading:
+        return const SizedBox.shrink();
+
+      case _DialogPhase.completed:
+        return SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () => Navigator.pop(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: const Icon(Icons.done_rounded, size: 18),
+            label: const Text('Cerrar'),
+          ),
+        );
+
+      case _DialogPhase.error:
+        return SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () => Navigator.pop(context),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: const Icon(Icons.close_rounded, size: 18),
+            label: const Text('Cerrar'),
+          ),
+        );
+    }
   }
 }

@@ -8,7 +8,6 @@ import 'ui/player/mini_player.dart';
 import 'ui/player/player_screen.dart';
 import 'ui/search/search_screen.dart';
 import 'ui/settings/settings_screen.dart';
-import 'ui/youtube/youtube_screen.dart'; // [NUEVO]
 import 'core/services/playback_service.dart';
 import 'core/services/playback_queue.dart';
 
@@ -23,10 +22,6 @@ class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
   bool _sidebarExpanded = true;
   bool _desktopPlayerExpanded = false;
-
-  // [NUEVO] Controla si la pantalla de YouTube está abierta.
-  // Solo se usa en móvil; en desktop siempre permanece false.
-  bool _youtubeOpen = false;
 
   // Estado del miniplayer móvil minimizado (oculto detrás de la barra).
   bool _miniPlayerMinimized = false;
@@ -45,8 +40,6 @@ class _AppShellState extends State<AppShell> {
   static const double _expandedWidth = 240;
   static const double _collapsedWidth = 72;
 
-  // Distancia desde abajo a la que flota el miniplayer móvil
-  // (justo encima de la barra de navegación).
   static const double _mobileMiniPlayerBottom = 80;
 
   static const Duration _sidebarAnimationDuration = Duration(milliseconds: 250);
@@ -86,8 +79,6 @@ class _AppShellState extends State<AppShell> {
     const HomeScreen(),
     LibraryScreen(key: _libraryKey),
     SearchScreen(
-      // [CONECTADO] Navega a Biblioteca y abre el detalle correspondiente
-      // (artista / álbum / podcast) según lo pulsado en Buscar.
       onOpenDetail:
           ({
             required String title,
@@ -97,9 +88,6 @@ class _AppShellState extends State<AppShell> {
           }) async {
             _selectPage(1);
 
-            // El PageView construye sus hijos de forma diferida: tras cambiar
-            // de página puede pasar algún frame antes de que LibraryScreen
-            // esté montado. Esperamos a que `currentState` exista.
             for (int i = 0; i < 30; i++) {
               await WidgetsBinding.instance.endOfFrame;
               final state = _libraryKey.currentState;
@@ -125,22 +113,8 @@ class _AppShellState extends State<AppShell> {
     return MediaQuery.sizeOf(context).width >= 700;
   }
 
-  // 🔧 FIX: helper central para cerrar el teclado. Descarta el foco actual
-  // para que cualquier TextField activo (Buscar, YouTube, etc.) pierda el
-  // foco y el teclado se oculte.
   void _dismissKeyboard() {
     FocusManager.instance.primaryFocus?.unfocus();
-  }
-
-  // [NUEVO] Abre/cierra la pantalla de YouTube con el mismo botón.
-  // Solo disponible en móvil: en desktop se ignora.
-  void _toggleYouTube() {
-    if (_isDesktop(context)) return;
-    // 🔧 FIX: cerrar teclado al abrir/cerrar YouTube.
-    _dismissKeyboard();
-    setState(() {
-      _youtubeOpen = !_youtubeOpen;
-    });
   }
 
   Future<void> _openPlayerScreen() async {
@@ -235,7 +209,6 @@ class _AppShellState extends State<AppShell> {
   void _selectPage(int index) {
     if (_selectedIndex == index) return;
 
-    // 🔧 FIX: al cambiar de pestaña se cierra el teclado.
     _dismissKeyboard();
 
     setState(() {
@@ -254,17 +227,6 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _handleBack() {
-    // [NUEVO] Si YouTube está abierto, el back lo cierra primero.
-    // (Solo puede ocurrir en móvil.)
-    if (_youtubeOpen) {
-      // 🔧 FIX: cerrar teclado al cerrar YouTube con back.
-      _dismissKeyboard();
-      setState(() {
-        _youtubeOpen = false;
-      });
-      return;
-    }
-
     if (_selectedIndex == 1) {
       final libraryState = _libraryKey.currentState;
 
@@ -307,9 +269,7 @@ class _AppShellState extends State<AppShell> {
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return PopScope<Object?>(
-      // [NUEVO] No se puede hacer pop del shell si YouTube está abierto.
-      // En desktop _youtubeOpen siempre es false.
-      canPop: _selectedIndex == 0 && !_youtubeOpen,
+      canPop: _selectedIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
           _handleBack();
@@ -330,68 +290,17 @@ class _AppShellState extends State<AppShell> {
                         children: [
                           if (isDesktop) _buildSidebar(),
                           Expanded(
-                            // [AJUSTE] El panel de YouTube se superpone
-                            // SOLO sobre el área de contenido (PageView),
-                            // no sobre la TitleBar, el sidebar ni la
-                            // BottomNavigationBar.
-                            child: Stack(
-                              children: [
-                                PageView(
-                                  controller: _pageController,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  onPageChanged: (index) {
-                                    if (_selectedIndex != index) {
-                                      setState(() {
-                                        _selectedIndex = index;
-                                      });
-                                    }
-                                  },
-                                  children: _screens,
-                                ),
-
-                                // [AJUSTE] Panel de YouTube dentro del área
-                                // de contenido. Solo se monta en móvil.
-                                if (!isDesktop)
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      ignoring: !_youtubeOpen,
-                                      child: AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 260,
-                                        ),
-                                        switchInCurve: Curves.easeOutCubic,
-                                        switchOutCurve: Curves.easeInCubic,
-                                        transitionBuilder: (child, animation) {
-                                          final slide = Tween<Offset>(
-                                            begin: const Offset(0, 0.04),
-                                            end: Offset.zero,
-                                          ).animate(animation);
-
-                                          return FadeTransition(
-                                            opacity: animation,
-                                            child: SlideTransition(
-                                              position: slide,
-                                              child: child,
-                                            ),
-                                          );
-                                        },
-                                        child: _youtubeOpen
-                                            ? Container(
-                                                key: const ValueKey<String>(
-                                                  'youtube-open',
-                                                ),
-                                                color: AppTheme.surface,
-                                                child: const YouTubeScreen(),
-                                              )
-                                            : const SizedBox.shrink(
-                                                key: ValueKey<String>(
-                                                  'youtube-closed',
-                                                ),
-                                              ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                            child: PageView(
+                              controller: _pageController,
+                              physics: const NeverScrollableScrollPhysics(),
+                              onPageChanged: (index) {
+                                if (_selectedIndex != index) {
+                                  setState(() {
+                                    _selectedIndex = index;
+                                  });
+                                }
+                              },
+                              children: _screens,
                             ),
                           ),
                         ],
@@ -402,9 +311,6 @@ class _AppShellState extends State<AppShell> {
                   ],
                 ),
 
-                // [AJUSTE] Los miniplayers se dibujan DESPUÉS del Column
-                // en el Stack, por lo que quedan por ENCIMA del panel
-                // de YouTube (y también del PageView). Sin cambios.
                 if (!isDesktop && !keyboardVisible)
                   Positioned(
                     left: 0,
@@ -588,28 +494,11 @@ class _AppShellState extends State<AppShell> {
           ),
           Expanded(
             child: Text(
-              // [NUEVO] El título muestra "YouTube" cuando esa pantalla
-              // está abierta. (Solo posible en móvil.)
-              _youtubeOpen ? 'YouTube' : _titles[_selectedIndex],
+              _titles[_selectedIndex],
               style: Theme.of(context).textTheme.titleMedium,
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // [NUEVO] Mismo botón para abrir y cerrar la pantalla de YouTube.
-          // Solo visible en móvil: en desktop se oculta.
-          if (!_isDesktop(context))
-            IconButton(
-              tooltip: _youtubeOpen ? 'Cerrar YouTube' : 'Abrir YouTube',
-              icon: Icon(
-                _youtubeOpen
-                    ? Icons.close_rounded
-                    : Icons.play_circle_outline_rounded,
-              ),
-              color: _youtubeOpen
-                  ? AppTheme.accent
-                  : const Color.fromARGB(255, 255, 255, 255),
-              onPressed: _toggleYouTube,
-            ),
         ],
       ),
     );
@@ -717,7 +606,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _buildSidebarItem(int index) {
-    final selected = _selectedIndex == index && !_youtubeOpen;
+    final selected = _selectedIndex == index;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
@@ -728,14 +617,7 @@ class _AppShellState extends State<AppShell> {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
-            // 🔧 FIX: cerrar teclado al navegar desde el sidebar.
             _dismissKeyboard();
-            // [NUEVO] Al navegar desde el menú, cierra YouTube.
-            if (_youtubeOpen) {
-              setState(() {
-                _youtubeOpen = false;
-              });
-            }
             _selectPage(index);
           },
           child: SizedBox(
@@ -787,14 +669,7 @@ class _AppShellState extends State<AppShell> {
     return NavigationBar(
       selectedIndex: _selectedIndex,
       onDestinationSelected: (index) {
-        // 🔧 FIX: cerrar teclado al navegar desde la barra inferior.
         _dismissKeyboard();
-        // [NUEVO] Al navegar desde la barra inferior, cierra YouTube.
-        if (_youtubeOpen) {
-          setState(() {
-            _youtubeOpen = false;
-          });
-        }
         _selectPage(index);
       },
       destinations: const [
@@ -826,12 +701,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// Gestos del miniplayer móvil (solo se activan si [enabled] es true):
-///  - deslizar a izquierda o derecha -> [onDismiss] (cerrar y detener música)
-///  - deslizar hacia abajo           -> [onMinimize] (ocultar sin detener)
-///
-/// El miniplayer sigue al dedo mientras se arrastra y, si no se supera el
-/// umbral, regresa a su posición con una animación.
+/// Gestos del miniplayer móvil.
 class _MiniPlayerSwipe extends StatefulWidget {
   const _MiniPlayerSwipe({
     required this.enabled,
@@ -853,11 +723,8 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     with SingleTickerProviderStateMixin {
   static const Duration _settleDuration = Duration(milliseconds: 220);
   static const Duration _dismissDuration = Duration(milliseconds: 200);
-
   static const Duration _dismissResetDelay = Duration(milliseconds: 320);
-
   static const Duration _minimizeDuration = Duration(milliseconds: 180);
-
   static const double _dismissDistanceFactor = 0.35;
   static const double _dismissVelocity = 700;
   static const double _minimizeDistance = 36;
@@ -882,7 +749,6 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
 
   void _onTick() {
     final t = Curves.easeOutCubic.transform(_controller.value);
-
     setState(() {
       _offset = Offset.lerp(_from, _to, t)!;
     });
@@ -892,15 +758,12 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     _from = _offset;
     _to = target;
     _controller.duration = duration ?? _settleDuration;
-
     return _controller.forward(from: 0);
   }
 
   Future<void> _resetAfter(Duration delay) async {
     await Future<void>.delayed(delay);
-
     if (!mounted) return;
-
     setState(() {
       _offset = Offset.zero;
       _busy = false;
@@ -909,17 +772,14 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
 
   Future<void> _settleBack() async {
     if (_busy || _offset == Offset.zero) return;
-
     _busy = true;
     await _animateTo(Offset.zero);
-
     if (!mounted) return;
     _busy = false;
   }
 
   void _onHorizontalUpdate(DragUpdateDetails details) {
     if (_busy) return;
-
     setState(() {
       _offset = Offset(_offset.dx + details.delta.dx, 0);
     });
@@ -951,9 +811,7 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
 
   void _onVerticalUpdate(DragUpdateDetails details) {
     if (_busy) return;
-
     final dy = _offset.dy + details.delta.dy;
-
     setState(() {
       _offset = Offset(0, dy < 0 ? 0 : dy);
     });
@@ -966,14 +824,10 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
 
     if (_offset.dy > _minimizeDistance || velocity > _minimizeVelocity) {
       _busy = true;
-
       final height = context.size?.height ?? 120;
       await _animateTo(Offset(0, height), duration: _minimizeDuration);
-
       if (!mounted) return;
-
       widget.onMinimize();
-
       setState(() {
         _offset = Offset.zero;
         _busy = false;
@@ -988,7 +842,6 @@ class _MiniPlayerSwipeState extends State<_MiniPlayerSwipe>
     final horizontal = (_offset.dx.abs() / (width * 0.7))
         .clamp(0.0, 1.0)
         .toDouble();
-
     return 1.0 - horizontal;
   }
 
