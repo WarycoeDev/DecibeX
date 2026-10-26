@@ -35,6 +35,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/icon/icon.png
+
+
 
   fonts:
     - family: Quicksand
@@ -48,7 +53,12 @@ flutter:
         - asset: assets/fonts/quicksand/Quicksand-Bold.ttf
           weight: 700
 
+
+
 flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/icon/icon.png"
+
+  adaptive_icon_background: "#121212"
+  adaptive_icon_foreground: "assets/icon/icon.png"

@@ -1919,20 +1919,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: AppTheme.surfaceVariant,
                     width: 0.7,
                   ),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      _accentColor,
-                      Color.lerp(_accentColor, Colors.black, 0.55)!,
-                    ],
-                  ),
                 ),
-                child: Icon(
-                  Icons.music_note_rounded,
-                  color: Colors.white.withValues(alpha: 0.95),
-                  size: 32,
-                ),
+                clipBehavior: Clip.antiAlias,
+                child: Image.asset('assets/icon/icon.png', fit: BoxFit.cover),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -2016,20 +2005,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
-        ),
-        _buildDivider(),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 4,
-          ),
-          leading: Icon(Icons.mail_outline_rounded, color: _accentColor),
-          title: const Text('Contacto y soporte'),
-          subtitle: const Text('Reportar problemas o sugerencias'),
-          trailing: const Icon(Icons.open_in_new_rounded, size: 18),
-          onTap: () {
-            // TODO: abrir correo o formulario de soporte
-          },
         ),
         _buildDivider(),
 
