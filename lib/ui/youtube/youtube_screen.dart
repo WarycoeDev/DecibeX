@@ -23,6 +23,8 @@ class _YouTubeScreenState extends State<YouTubeScreen>
   static const _prefsDownloadDirKey = 'youtube_download_directory';
 
   final TextEditingController _searchController = TextEditingController();
+  // 🔧 FIX: FocusNode propio para poder gestionar el foco manualmente.
+  final FocusNode _searchFocusNode = FocusNode();
   final YoutubeExplode _yt = YoutubeExplode();
   final YoutubeDLFlutter _downloader = YoutubeDLFlutter.instance;
   final ScrollController _scrollController = ScrollController();
@@ -47,12 +49,20 @@ class _YouTubeScreenState extends State<YouTubeScreen>
     );
 
     _searchController.addListener(_onSearchChanged);
+
+    // 🔧 FIX: garantizar que el campo no tenga foco al entrar a la pantalla.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _searchFocusNode.unfocus();
+      }
+    });
   }
 
   @override
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _scrollController.dispose();
     _entryController.dispose();
     _yt.close();
@@ -237,6 +247,9 @@ class _YouTubeScreenState extends State<YouTubeScreen>
       ),
       child: TextField(
         controller: _searchController,
+        focusNode: _searchFocusNode,
+        // 🔧 FIX: nunca autofocus. El teclado solo se abre al tocar.
+        autofocus: false,
         textInputAction: TextInputAction.search,
         onSubmitted: _search,
         decoration: InputDecoration(
@@ -665,6 +678,12 @@ class _DownloadConfigDialogState extends State<_DownloadConfigDialog> {
     );
     _directory = widget.initialDirectory;
 
+    // 🔧 FIX: el campo de nombre no debe robar el foco al abrir el diálogo.
+    // Nos aseguramos de que quede sin foco tras el primer frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _nameFocusNode.unfocus();
+    });
+
     // Al ganar foco el campo de nombre, hacemos scroll para que quede visible
     // por encima del teclado. Esperamos dos frames: uno para que el teclado
     // se abra y otro para que el layout se reacomode antes de scrollear.
@@ -1029,6 +1048,8 @@ class _DownloadConfigDialogState extends State<_DownloadConfigDialog> {
                   key: _nameFieldKey,
                   focusNode: _nameFocusNode,
                   controller: _nameController,
+                  // 🔧 FIX: no autofocus al abrir el diálogo.
+                  autofocus: false,
                   onChanged: (_) => setState(() {}),
                   decoration: _inputDecoration(
                     'Nombre sin extensión',

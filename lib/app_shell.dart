@@ -125,10 +125,19 @@ class _AppShellState extends State<AppShell> {
     return MediaQuery.sizeOf(context).width >= 700;
   }
 
+  // 🔧 FIX: helper central para cerrar el teclado. Descarta el foco actual
+  // para que cualquier TextField activo (Buscar, YouTube, etc.) pierda el
+  // foco y el teclado se oculte.
+  void _dismissKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   // [NUEVO] Abre/cierra la pantalla de YouTube con el mismo botón.
   // Solo disponible en móvil: en desktop se ignora.
   void _toggleYouTube() {
     if (_isDesktop(context)) return;
+    // 🔧 FIX: cerrar teclado al abrir/cerrar YouTube.
+    _dismissKeyboard();
     setState(() {
       _youtubeOpen = !_youtubeOpen;
     });
@@ -226,6 +235,9 @@ class _AppShellState extends State<AppShell> {
   void _selectPage(int index) {
     if (_selectedIndex == index) return;
 
+    // 🔧 FIX: al cambiar de pestaña se cierra el teclado.
+    _dismissKeyboard();
+
     setState(() {
       _selectedIndex = index;
     });
@@ -245,6 +257,8 @@ class _AppShellState extends State<AppShell> {
     // [NUEVO] Si YouTube está abierto, el back lo cierra primero.
     // (Solo puede ocurrir en móvil.)
     if (_youtubeOpen) {
+      // 🔧 FIX: cerrar teclado al cerrar YouTube con back.
+      _dismissKeyboard();
       setState(() {
         _youtubeOpen = false;
       });
@@ -714,6 +728,8 @@ class _AppShellState extends State<AppShell> {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
+            // 🔧 FIX: cerrar teclado al navegar desde el sidebar.
+            _dismissKeyboard();
             // [NUEVO] Al navegar desde el menú, cierra YouTube.
             if (_youtubeOpen) {
               setState(() {
@@ -771,6 +787,8 @@ class _AppShellState extends State<AppShell> {
     return NavigationBar(
       selectedIndex: _selectedIndex,
       onDestinationSelected: (index) {
+        // 🔧 FIX: cerrar teclado al navegar desde la barra inferior.
+        _dismissKeyboard();
         // [NUEVO] Al navegar desde la barra inferior, cierra YouTube.
         if (_youtubeOpen) {
           setState(() {

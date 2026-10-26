@@ -1904,54 +1904,156 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildAboutCard() {
     return _buildCard(
       children: [
-        const ListTile(
-          contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-          leading: Icon(Icons.music_note_rounded),
-          title: Text('DecibeX'),
-          subtitle: Text('Reproductor de música'),
+        // Identidad de la app
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: AppTheme.surfaceVariant,
+                    width: 0.7,
+                  ),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      _accentColor,
+                      Color.lerp(_accentColor, Colors.black, 0.55)!,
+                    ],
+                  ),
+                ),
+                child: Icon(
+                  Icons.music_note_rounded,
+                  color: Colors.white.withValues(alpha: 0.95),
+                  size: 32,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'DecibeX',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Reproductor de música y podcasts',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _accentColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(50),
+                      ),
+                      child: Text(
+                        'Versión 1.0.0',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: _accentColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        _buildDivider(),
+
+        // Descripción
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+          child: Text(
+            'DecibeX es un reproductor local enfocado en la calidad de audio, '
+            'con soporte para ReplayGain, fades de volumen y organización '
+            'de tu biblioteca musical y de podcasts.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppTheme.textSecondary,
+              height: 1.5,
+            ),
+          ),
+        ),
+        _buildDivider(),
+
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 4,
+          ),
+          leading: Icon(Icons.description_outlined, color: _accentColor),
+          title: const Text('Licencias de terceros'),
+          subtitle: const Text('Paquetes y recursos utilizados'),
+          trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+          onTap: () => showLicensePage(
+            context: context,
+            applicationName: 'DecibeX',
+            applicationVersion: '1.0.0',
+            applicationIcon: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(
+                Icons.music_note_rounded,
+                size: 48,
+                color: _accentColor,
+              ),
+            ),
+          ),
         ),
         _buildDivider(),
         ListTile(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 18,
-            vertical: 6,
+            vertical: 4,
           ),
-          leading: const Icon(Icons.save_outlined),
-          title: const Text('Archivo de configuración'),
-          subtitle: Text(
-            _storagePath ?? 'Ruta pendiente de determinar',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-          ),
+          leading: Icon(Icons.mail_outline_rounded, color: _accentColor),
+          title: const Text('Contacto y soporte'),
+          subtitle: const Text('Reportar problemas o sugerencias'),
+          trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+          onTap: () {
+            // TODO: abrir correo o formulario de soporte
+          },
         ),
-        if (_storageError != null) ...[
-          _buildDivider(),
-          ListTile(
-            leading: const Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.orange,
-            ),
-            title: const Text('Error de almacenamiento'),
-            subtitle: Text(
-              _storageError!,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
         _buildDivider(),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 6,
-          ),
-          leading: Icon(
-            _isSaving ? Icons.sync_rounded : Icons.check_circle_outline,
-            color: _isSaving ? _accentColor : AppTheme.textSecondary,
-          ),
-          title: Text(_isSaving ? 'Guardando ajustes...' : 'Guardado local'),
-          subtitle: const Text(
-            'Las preferencias se almacenan en un archivo .decibex.',
+
+        // Créditos
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Hecho con Flutter',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '© ${DateTime.now().year} DecibeX. Todos los derechos reservados.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary),
+              ),
+            ],
           ),
         ),
       ],

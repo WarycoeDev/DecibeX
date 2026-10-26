@@ -80,6 +80,14 @@ class _SearchScreenState extends State<SearchScreen>
     );
     _scanner.initialize();
     _scanner.addListener(_invalidateCache);
+
+    // 🔧 FIX: evitar que el teclado se abra automáticamente al entrar a la
+    // pantalla. Se asegura que el campo no tenga foco tras el primer frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.unfocus();
+      }
+    });
   }
 
   @override
@@ -393,6 +401,8 @@ class _SearchScreenState extends State<SearchScreen>
 
   void _clearQuery() {
     _controller.clear();
+    // 🔧 FIX: al borrar sí pedimos foco intencionadamente (acción del usuario),
+    // así que aquí se mantiene el requestFocus.
     _focusNode.requestFocus();
     _onQueryChanged('');
   }
@@ -570,6 +580,8 @@ class _SearchScreenState extends State<SearchScreen>
         return TextField(
           controller: _controller,
           focusNode: _focusNode,
+          // 🔧 FIX: nunca autofocus. El teclado solo debe abrirse al tocar.
+          autofocus: false,
           textInputAction: TextInputAction.search,
           onChanged: _onQueryChanged,
           style: theme.textTheme.bodyLarge?.copyWith(
