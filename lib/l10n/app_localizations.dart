@@ -769,7 +769,7 @@ class AppLocalizations {
           'Agrega una carpeta para configurar tus podcasts.',
       'aboutAppName': 'DecibeX',
       'aboutAppTagline': 'Reproductor de música y podcasts',
-      'aboutVersion': 'Versión 1.0.0',
+      'aboutVersion': 'Versión 1.2.0',
       'aboutDescription':
           'DecibeX es un reproductor local enfocado en la calidad de audio, con soporte para ReplayGain, fades de volumen y organización de tu biblioteca musical y de podcasts.',
       'aboutLicenses': 'Licencias de terceros',
@@ -1146,7 +1146,7 @@ class AppLocalizations {
       'noPodcastDirectoriesHint': 'Add a folder to configure your podcasts.',
       'aboutAppName': 'DecibeX',
       'aboutAppTagline': 'Music and podcast player',
-      'aboutVersion': 'Version 1.0.0',
+      'aboutVersion': 'Version 1.2.0',
       'aboutDescription':
           'DecibeX is a local player focused on audio quality, with support for ReplayGain, volume fades and organization of your music and podcast library.',
       'aboutLicenses': 'Third-party licenses',
