@@ -40,10 +40,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
-  String _tr(String es, String en) {
-    return Localizations.localeOf(context).languageCode == 'es' ? es : en;
-  }
-
   _LayoutSize _layoutFor(double width) {
     if (width < 400) return _LayoutSize.compact;
     if (width < 700) return _LayoutSize.medium;
@@ -382,7 +378,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
           IconButton(
-            tooltip: _tr('Efectos', 'Effects'),
+            tooltip: l10n.effects,
             onPressed: _showEffectsSheet,
             icon: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
@@ -856,7 +852,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Expanded(
             child: _buildMenuButton(
               icon: _effectsIcon,
-              label: _tr('Efectos', 'Effects'),
+              label: l10n.effects,
               isActive: _effectsActive,
               onPressed: _showEffectsSheet,
             ),
@@ -1042,7 +1038,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            _tr('Efectos', 'Effects'),
+                            l10n.effects,
                             style: const TextStyle(
                               fontSize: 19,
                               fontWeight: FontWeight.w600,
@@ -1059,7 +1055,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     const SizedBox(height: 8),
                     _EffectControl(
                       icon: Icons.slow_motion_video_rounded,
-                      title: _tr('Slowed (más lento)', 'Slowed'),
+                      title: l10n.slowedEffect,
                       valueLabel: '${slowSpeed.toStringAsFixed(2)}x',
                       enabled: settings.slowEnabled,
                       amount: settings.slowAmount,
@@ -1069,17 +1065,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                     _EffectControl(
                       icon: Icons.blur_on_rounded,
-                      title: 'Reverb',
+                      title: l10n.reverbEffect,
                       valueLabel: '${(settings.reverbAmount * 100).round()}%',
                       enabled: settings.reverbEnabled,
                       amount: settings.reverbAmount,
                       available: playback.reverbSupported,
                       hint: playback.reverbSupported
                           ? null
-                          : _tr(
-                              'Solo disponible en Android',
-                              'Only available on Android',
-                            ),
+                          : l10n.reverbAndroidOnly,
                       onToggle: settings.setReverbEnabled,
                       onChanged: settings.setReverbAmount,
                       onChangeEnd: (_) => unawaited(settings.save()),

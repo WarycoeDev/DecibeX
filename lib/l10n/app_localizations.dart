@@ -415,6 +415,10 @@ class AppLocalizations {
       get('audioNotificationChannelName');
   String get audioNotificationChannelDescription =>
       get('audioNotificationChannelDescription');
+  String get effects => get('effects');
+  String get slowedEffect => get('slowedEffect');
+  String get reverbEffect => get('reverbEffect');
+  String get reverbAndroidOnly => get('reverbAndroidOnly');
 
   static const Map<String, Map<String, String>> _catalog = {
     'es': {
@@ -798,9 +802,17 @@ class AppLocalizations {
           'El escaneo terminó parcialmente. Se conservaron los archivos que no pudieron verificarse.',
       'scanError': 'Error durante el escaneo: {error}',
       'favoriteSaveError': 'No se pudo guardar el favorito: {error}',
+      'effects': 'Efectos',
+      'slowedEffect': 'Slowed (más lento)',
+      'reverbEffect': 'Reverb',
+      'reverbAndroidOnly': 'Solo disponible en Android',
     },
     'en': {
       'audioNotificationChannelName': 'Audio playback',
+      'effects': 'Effects',
+      'slowedEffect': 'Slowed',
+      'reverbEffect': 'Reverb',
+      'reverbAndroidOnly': 'Only available on Android',
       'audioNotificationChannelDescription': 'DecibeX playback controls',
       'home': 'Home',
       'library': 'Library',
