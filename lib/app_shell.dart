@@ -21,6 +21,10 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
+
+  /// Dirección del último cambio de pestaña: 1 = hacia adelante, -1 = hacia atrás.
+  int _slideDirection = 1;
+
   bool _sidebarExpanded = true;
   bool _desktopPlayerExpanded = false;
 
@@ -34,10 +38,6 @@ class _AppShellState extends State<AppShell> {
   final GlobalKey<LibraryScreenState> _libraryKey =
       GlobalKey<LibraryScreenState>();
 
-  late final PageController _pageController = PageController(
-    initialPage: _selectedIndex,
-  );
-
   static const double _expandedWidth = 240;
   static const double _collapsedWidth = 72;
 
@@ -45,7 +45,7 @@ class _AppShellState extends State<AppShell> {
 
   static const Duration _sidebarAnimationDuration = Duration(milliseconds: 250);
 
-  static const Duration _pageAnimationDuration = Duration(milliseconds: 350);
+  static const Duration _pageAnimationDuration = Duration(milliseconds: 220);
 
   static const Duration _miniPlayerEnterDuration = Duration(milliseconds: 320);
 
@@ -55,12 +55,17 @@ class _AppShellState extends State<AppShell> {
     milliseconds: 320,
   );
 
-  List<String> _titles(BuildContext context) => [
-    context.l10n.home,
-    context.l10n.library,
-    context.l10n.search,
-    context.l10n.settings,
-  ];
+  // ⚡ Cache de títulos localizados para evitar recrear la lista en cada build.
+  List<String>? _cachedTitles;
+
+  List<String> _titles(BuildContext context) {
+    return _cachedTitles ??= [
+      context.l10n.home,
+      context.l10n.library,
+      context.l10n.search,
+      context.l10n.settings,
+    ];
+  }
 
   static const List<IconData> _icons = [
     Icons.home_outlined,
@@ -213,18 +218,9 @@ class _AppShellState extends State<AppShell> {
     _dismissKeyboard();
 
     setState(() {
+      _slideDirection = index > _selectedIndex ? 1 : -1;
       _selectedIndex = index;
     });
-
-    if (_isAndroid) {
-      _pageController.animateToPage(
-        index,
-        duration: _pageAnimationDuration,
-        curve: Curves.easeInOutCubic,
-      );
-    } else {
-      _pageController.jumpToPage(index);
-    }
   }
 
   void _handleBack() {
@@ -257,9 +253,43 @@ class _AppShellState extends State<AppShell> {
     _setMiniPlayerMinimized(false);
   }
 
+  /// ⚡ Transición entre pestañas: solo fade (sin slide).
+  ///
+  /// - `KeyedSubtree` con key por índice: permite a `AnimatedSwitcher`
+  ///   identificar correctamente entrada y salida (sin superposición).
+  /// - `RepaintBoundary` interno: aísla el repintado de la pantalla pesada.
+  /// - Una sola `CurvedAnimation` para el fade.
+  Widget _buildPageTransition() {
+    return AnimatedSwitcher(
+      duration: _pageAnimationDuration,
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      layoutBuilder: (currentChild, previousChildren) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ...previousChildren,
+            if (currentChild != null) currentChild,
+          ],
+        );
+      },
+      transitionBuilder: (child, animation) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOut,
+        );
+
+        return FadeTransition(opacity: curved, child: child);
+      },
+      child: KeyedSubtree(
+        key: ValueKey<int>(_selectedIndex),
+        child: RepaintBoundary(child: _screens[_selectedIndex]),
+      ),
+    );
+  }
+
   @override
   void dispose() {
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -290,20 +320,7 @@ class _AppShellState extends State<AppShell> {
                       child: Row(
                         children: [
                           if (isDesktop) _buildSidebar(),
-                          Expanded(
-                            child: PageView(
-                              controller: _pageController,
-                              physics: const NeverScrollableScrollPhysics(),
-                              onPageChanged: (index) {
-                                if (_selectedIndex != index) {
-                                  setState(() {
-                                    _selectedIndex = index;
-                                  });
-                                }
-                              },
-                              children: _screens,
-                            ),
-                          ),
+                          Expanded(child: _buildPageTransition()),
                         ],
                       ),
                     ),
@@ -494,10 +511,19 @@ class _AppShellState extends State<AppShell> {
             color: AppTheme.surfaceVariant,
           ),
           Expanded(
-            child: Text(
-              _titles(context)[_selectedIndex],
-              style: Theme.of(context).textTheme.titleMedium,
-              overflow: TextOverflow.ellipsis,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 120),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              transitionBuilder: (child, animation) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              child: Text(
+                _titles(context)[_selectedIndex],
+                key: ValueKey<int>(_selectedIndex),
+                style: Theme.of(context).textTheme.titleMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
         ],

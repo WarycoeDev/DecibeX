@@ -21,10 +21,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.decibex"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -33,8 +30,18 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // 🔧 FIX: desactivar R8/ProGuard. El plugin `extractor`
+            // (youtubedl-android) usa Python/FFmpeg por JNI y R8 elimina
+            // clases que solo se referencian desde código nativo, lo que
+            // provoca el crash en release.
+            isMinifyEnabled = false
+            isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // TODO: firma real para publicar. Con debug basta para
+            // `flutter run --release` y para probar el crash.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
