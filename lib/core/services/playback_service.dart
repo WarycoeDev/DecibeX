@@ -98,6 +98,11 @@ class PlaybackService extends ChangeNotifier {
   //  4. TERMINAR: con t >= 1 (o si la saliente se acaba) la voz entrante SE
   //     PROMUEVE tal cual a voz principal. Nunca se vuelve a hacer play() de
   //     la misma fuente: eso era lo que duplicaba las canciones.
+  //
+  // PODCASTS: el crossfade NUNCA se usa con podcasts (ni como pista saliente
+  // ni como entrante). Si el crossfade está activado y suena un podcast, se
+  // reemplaza por un fade in + fade out con la misma duración del crossfade
+  // (ver `_podcastFadeFallback`).
 
   /// Con cuánta antelación (antes de la ventana) se precarga la siguiente.
   static const Duration _crossfadePreloadLead = Duration(seconds: 10);
@@ -494,13 +499,11 @@ class PlaybackService extends ChangeNotifier {
     final position = _livePosition();
     _position = position;
 
-    final settings = SettingsService.instance;
-
     // Crossfade: preparar, arrancar, mezclar y terminar (todo por posición).
     _driveCrossfade(position);
 
     // Durante la mezcla el volumen lo gobierna _mixCrossfade.
-    if (!_crossfading && (settings.fadeInEnabled || settings.fadeOutEnabled)) {
+    if (!_crossfading && _hasActiveFades(_currentSong)) {
       unawaited(_applyVolume(at: position));
     }
 
@@ -642,18 +645,46 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
+  /// Los podcasts nunca usan crossfade. Si el crossfade está activado y [song]
+  /// es un podcast, se sustituye por un fade in + fade out cuya duración es la
+  /// del crossfade (en lugar de las duraciones de fade in / fade out propias).
+  bool _podcastFadeFallback(Song? song) {
+    if (song == null || !song.isPodcast) return false;
+    return SettingsService.instance.crossfadeEnabled;
+  }
+
+  /// ¿Hay algún fade que aplicar a [song] en este momento?
+  bool _hasActiveFades(Song? song) {
+    final settings = SettingsService.instance;
+
+    return _podcastFadeFallback(song) ||
+        settings.fadeInEnabled ||
+        settings.fadeOutEnabled;
+  }
+
   /// Devuelve el índice vigente, reconstruyéndolo si cambió la duración de
   /// algún fade (settings), la velocidad o la duración de la pista.
   FadeIndex? _currentFadeIndex() {
     final settings = SettingsService.instance;
     final speed = settings.effectiveSpeed;
 
-    final inMs = settings.fadeInEnabled
-        ? (settings.fadeInDuration * 1000 * speed).round()
-        : 0;
-    final outMs = settings.fadeOutEnabled
-        ? (settings.fadeOutDuration * 1000 * speed).round()
-        : 0;
+    final int inMs;
+    final int outMs;
+
+    if (_podcastFadeFallback(_currentSong)) {
+      // Podcast con crossfade activado: fade in y fade out con la duración
+      // del crossfade.
+      final ms = (settings.crossfadeDuration * 1000 * speed).round();
+      inMs = ms;
+      outMs = ms;
+    } else {
+      inMs = settings.fadeInEnabled
+          ? (settings.fadeInDuration * 1000 * speed).round()
+          : 0;
+      outMs = settings.fadeOutEnabled
+          ? (settings.fadeOutDuration * 1000 * speed).round()
+          : 0;
+    }
 
     if (inMs <= 0 && outMs <= 0) return null;
 
@@ -723,12 +754,16 @@ class PlaybackService extends ChangeNotifier {
   // CROSSFADE
   // ===========================================================================
 
-  /// Duración (en tiempo de PISTA) de la mezcla. 0 si está desactivado o la
-  /// pista es muy corta. Se ajusta a la velocidad para que dure lo
-  /// configurado en tiempo real aunque la pista vaya lenta.
+  /// Duración (en tiempo de PISTA) de la mezcla. 0 si está desactivado, la
+  /// pista es muy corta o la pista actual es un podcast (los podcasts nunca
+  /// hacen crossfade). Se ajusta a la velocidad para que dure lo configurado
+  /// en tiempo real aunque la pista vaya lenta.
   Duration _crossfadeDuration() {
     final settings = SettingsService.instance;
     if (!settings.crossfadeEnabled) return Duration.zero;
+
+    // Podcast: sin crossfade (se usa fade in/out, ver _podcastFadeFallback).
+    if (_currentSong?.isPodcast ?? false) return Duration.zero;
 
     if (_duration <= const Duration(seconds: 2)) return Duration.zero;
 
@@ -792,7 +827,8 @@ class PlaybackService extends ChangeNotifier {
         ? current
         : _getNextSong(commit: false);
 
-    // Sin siguiente (fin de cola) o podcasts: transición normal.
+    // Sin siguiente (fin de cola) o podcasts (saliente o entrante):
+    // transición normal, sin crossfade.
     if (next == null || current.isPodcast || next.isPodcast) {
       _crossfadeBlocked = true;
       return;
@@ -901,6 +937,7 @@ class PlaybackService extends ChangeNotifier {
     if (_currentSong == null || _handlingCompletion) return;
 
     if (!_crossfading) {
+      // Con un podcast sonando esto devuelve 0: nunca hay crossfade.
       final cf = _crossfadeDuration();
       if (cf <= Duration.zero || _crossfadeBlocked) return;
 
