@@ -40,8 +40,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
-  /// Textos de los efectos. Cuando quieras, muévelos a los .arb y
-  /// reemplaza las llamadas por `l10n.xxx`.
   String _tr(String es, String en) {
     return Localizations.localeOf(context).languageCode == 'es' ? es : en;
   }
@@ -97,8 +95,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     Navigator.of(context).maybePop();
   }
 
+  /// Altura de la status bar. Usamos `viewPaddingOf` en vez de `paddingOf`
+  /// porque `SafeArea(top: false)` no consume ese valor, pero otros widgets
+  /// padres sí podrían hacerlo, devolviendo 0 con `paddingOf`.
   double _statusBarHeight(BuildContext context) {
-    return MediaQuery.paddingOf(context).top;
+    return MediaQueryData.fromView(View.of(context)).viewPadding.top;
   }
 
   bool _isFavorite(Song? song) {
@@ -123,8 +124,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return settings.slowEnabled || settings.reverbEnabled;
   }
 
-  /// Icono del botón de opciones de reproducción: aleatorio > repetición >
-  /// efectos > repetición (apagado).
+  /// Icono del botón de opciones de reproducción: aleatorio > repetición.
   IconData _playbackOptionsIcon({
     required bool shuffle,
     required LoopMode repeat,
@@ -134,10 +134,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return switch (repeat) {
       LoopMode.one => Icons.repeat_one_rounded,
       LoopMode.all => Icons.repeat_rounded,
-      LoopMode.off =>
-        _effectsActive ? Icons.graphic_eq_rounded : Icons.repeat_rounded,
+      LoopMode.off => Icons.repeat_rounded,
     };
   }
+
+  /// Icono del botón de efectos.
+  IconData get _effectsIcon => Icons.graphic_eq_rounded;
 
   @override
   Widget build(BuildContext context) {
@@ -182,8 +184,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final horizontalPadding = isCompact ? 18.0 : 24.0;
 
-    // En compact reducimos el máximo del artwork para que quepan controles,
-    // progreso y menú inferior sin scroll en la mayoría de Android pequeños.
     final artworkMax = isCompact ? 300.0 : 360.0;
     final artworkMin = isCompact ? 180.0 : 220.0;
 
@@ -196,7 +196,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     return Column(
       children: [
-        SizedBox(height: _statusBarHeight(context)),
         _buildHeader(context),
         Expanded(
           child: SingleChildScrollView(
@@ -260,7 +259,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     return Column(
       children: [
-        SizedBox(height: _statusBarHeight(context)),
         _buildHeader(context),
         Expanded(
           child: Padding(
@@ -334,11 +332,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final shuffle = playback.shuffleEnabled;
     final repeat = playback.repeatMode;
     final effects = _effectsActive;
-    final active = shuffle || repeat != LoopMode.off || effects;
     final optionsIcon = _playbackOptionsIcon(shuffle: shuffle, repeat: repeat);
+    final playbackActive = shuffle || repeat != LoopMode.off;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -370,14 +368,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           IconButton(
             tooltip: l10n.playbackOptions,
-            onPressed: _showPlaybackOptionsSheet,
+            onPressed: _showPlaybackSettingsSheet,
             icon: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
               child: Icon(
                 optionsIcon,
-                key: ValueKey<String>('$shuffle-$repeat-$effects'),
+                key: ValueKey<String>('$shuffle-$repeat'),
                 size: 27,
-                color: active ? AppTheme.accent : AppTheme.textSecondary,
+                color: playbackActive
+                    ? AppTheme.accent
+                    : AppTheme.textSecondary,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: _tr('Efectos', 'Effects'),
+            onPressed: _showEffectsSheet,
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Icon(
+                _effectsIcon,
+                key: ValueKey<bool>(effects),
+                size: 27,
+                color: effects ? AppTheme.accent : AppTheme.textSecondary,
               ),
             ),
           ),
@@ -486,10 +499,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildHeader(BuildContext context) {
     final l10n = context.l10n;
 
+    final statusBarHeight = Platform.isAndroid
+        ? _statusBarHeight(context)
+        : 0.0;
+
     return SizedBox(
-      height: 64,
+      height: 64 + statusBarHeight,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: EdgeInsets.fromLTRB(12, statusBarHeight, 12, 0),
         child: Row(
           children: [
             IconButton(
@@ -812,7 +829,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final l10n = context.l10n;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
           Expanded(
@@ -826,9 +843,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
           Expanded(
-            child: _buildPlaybackOptionsButton(
-              shuffleEnabled: shuffleEnabled,
-              repeatMode: repeatMode,
+            child: _buildMenuButton(
+              icon: _playbackOptionsIcon(
+                shuffle: shuffleEnabled,
+                repeat: repeatMode,
+              ),
+              label: l10n.playback,
+              isActive: shuffleEnabled || repeatMode != LoopMode.off,
+              onPressed: _showPlaybackSettingsSheet,
+            ),
+          ),
+          Expanded(
+            child: _buildMenuButton(
+              icon: _effectsIcon,
+              label: _tr('Efectos', 'Effects'),
+              isActive: _effectsActive,
+              onPressed: _showEffectsSheet,
             ),
           ),
           Expanded(
@@ -843,50 +873,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildPlaybackOptionsButton({
-    required bool shuffleEnabled,
-    required LoopMode repeatMode,
-  }) {
-    final l10n = context.l10n;
-    final isActive =
-        shuffleEnabled || repeatMode != LoopMode.off || _effectsActive;
-    final icon = _playbackOptionsIcon(
-      shuffle: shuffleEnabled,
-      repeat: repeatMode,
-    );
-
-    return InkWell(
-      onTap: _showPlaybackOptionsSheet,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 22,
-              color: isActive ? AppTheme.accent : AppTheme.textSecondary,
-            ),
-            const SizedBox(height: 5),
-            Text(
-              l10n.playback,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11,
-                color: isActive ? AppTheme.accent : AppTheme.textSecondary,
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showPlaybackOptionsSheet() {
+  /// Menú inferior únicamente con las opciones de reproducción:
+  /// aleatorio y repetición. Los efectos quedan en su propio menú.
+  void _showPlaybackSettingsSheet() {
     final l10n = context.l10n;
 
     showModalBottomSheet<void>(
@@ -900,13 +889,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
       builder: (sheetContext) {
         return AnimatedBuilder(
-          animation: Listenable.merge([
-            PlaybackService.instance,
-            SettingsService.instance,
-          ]),
+          animation: PlaybackService.instance,
           builder: (context, _) {
             final playback = PlaybackService.instance;
-            final settings = SettingsService.instance;
 
             Widget buildOption({
               required IconData icon,
@@ -956,10 +941,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               );
             }
-
-            final slowSpeed = SettingsService.speedForAmount(
-              settings.slowAmount,
-            );
 
             return SingleChildScrollView(
               child: Padding(
@@ -1012,7 +993,70 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       selected: playback.repeatMode == LoopMode.all,
                       onTap: () => _setRepeatMode(LoopMode.all),
                     ),
-                    buildSectionTitle(_tr('EFECTOS', 'EFFECTS')),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Menú inferior dedicado a los efectos de audio (slowed y reverb).
+  void _showEffectsSheet() {
+    final l10n = context.l10n;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      useSafeArea: true,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return AnimatedBuilder(
+          animation: Listenable.merge([
+            PlaybackService.instance,
+            SettingsService.instance,
+          ]),
+          builder: (context, _) {
+            final playback = PlaybackService.instance;
+            final settings = SettingsService.instance;
+
+            final slowSpeed = SettingsService.speedForAmount(
+              settings.slowAmount,
+            );
+
+            return SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _tr('Efectos', 'Effects'),
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: l10n.close,
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close_rounded, size: 21),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                     _EffectControl(
                       icon: Icons.slow_motion_video_rounded,
                       title: _tr('Slowed (más lento)', 'Slowed'),
@@ -1235,7 +1279,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         splashColor: AppTheme.accent.withValues(alpha: 0.18),
         highlightColor: AppTheme.accent.withValues(alpha: 0.08),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1261,7 +1305,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   color: isActive ? AppTheme.accent : AppTheme.textSecondary,
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
                 ),
@@ -1906,8 +1950,6 @@ class _QueueListView extends StatelessWidget {
                                     File(artworkPath),
                                     fit: BoxFit.cover,
                                     alignment: Alignment.center,
-                                    // Solo limitamos el ancho; el alto se calcula
-                                    // proporcionalmente para no deformar la imagen.
                                     cacheWidth: 144,
                                     filterQuality: FilterQuality.low,
                                     errorBuilder: (context, error, stackTrace) {
