@@ -13,6 +13,7 @@ import '../../l10n/app_localizations.dart';
 /// - Reacciona a cambios con un watcher (por si el usuario edita a mano).
 /// - Expone setters inmediatos para que `PlaybackService` reaccione sin
 ///   esperar al watcher (p. ej. al mover el slider de preamp).
+/// - Los setters de efectos (slow / reverb) persisten solos con debounce.
 class SettingsService extends ChangeNotifier {
   SettingsService._();
 
@@ -23,8 +24,14 @@ class SettingsService extends ChangeNotifier {
   Directory? _directory;
   StreamSubscription<FileSystemEvent>? _watcher;
   Timer? _debounce;
+  Timer? _saveDebounce;
   bool _initialized = false;
   bool _disposed = false;
+
+  /// Último contenido escrito por nosotros. Sirve para ignorar el evento del
+  /// watcher que provoca nuestra propia escritura (evita que un slider
+  /// "salte" hacia atrás con un valor antiguo).
+  String? _lastWrittenContent;
 
   // --- Valores expuestos ---
   bool darkTheme = true;
@@ -39,12 +46,35 @@ class SettingsService extends ChangeNotifier {
   double fadeInDuration = 2;
   double fadeOutDuration = 2;
 
+  // --- Slowed + Reverb ---
+  bool slowEnabled = false;
+
+  /// 0.0 = velocidad normal, 1.0 = máxima ralentización.
+  double slowAmount = 0.4;
+
+  bool reverbEnabled = false;
+
+  /// 0.0 = sin reverb, 1.0 = máxima intensidad.
+  double reverbAmount = 0.4;
+
   bool scanSubdirectories = true;
   List<String> scanDirectories = [];
   List<String> podcastDirectories = [];
 
   bool artistsGridMode = false;
   bool albumsGridMode = false;
+
+  /// Con `slowAmount = 1.0` la pista suena a `1 - maxSlowdown` (0.65x).
+  static const double maxSlowdown = 0.35;
+
+  /// Velocidad resultante para un nivel de slider [amount] (0..1).
+  static double speedForAmount(double amount) {
+    final a = amount.clamp(0.0, 1.0).toDouble();
+    return 1.0 - a * maxSlowdown;
+  }
+
+  /// Velocidad realmente aplicada (1.0 si slow está desactivado).
+  double get effectiveSpeed => slowEnabled ? speedForAmount(slowAmount) : 1.0;
 
   /// Ruta del archivo de configuración (útil para mostrar en la UI).
   String? get storagePath =>
@@ -102,6 +132,10 @@ class SettingsService extends ChangeNotifier {
   Future<void> reload() async {
     if (_disposed) return;
 
+    // Hay cambios en memoria pendientes de guardar: son más recientes que
+    // lo que hay en disco, no los pisamos.
+    if (_saveDebounce?.isActive ?? false) return;
+
     try {
       final file = await _settingsFile();
       if (!await file.exists()) {
@@ -111,6 +145,9 @@ class SettingsService extends ChangeNotifier {
 
       final content = await file.readAsString();
       if (content.trim().isEmpty) return;
+
+      // Es el eco de nuestra propia escritura.
+      if (content == _lastWrittenContent) return;
 
       final decoded = jsonDecode(content);
       if (decoded is! Map<String, dynamic>) return;
@@ -200,6 +237,28 @@ class SettingsService extends ChangeNotifier {
       (v) => fadeOutDuration = v,
     );
 
+    // --- Slowed + Reverb ---
+    set(
+      slowEnabled,
+      readBool('slowEnabled', slowEnabled),
+      (v) => slowEnabled = v,
+    );
+    set(
+      slowAmount,
+      readDouble('slowAmount', slowAmount, 0, 1),
+      (v) => slowAmount = v,
+    );
+    set(
+      reverbEnabled,
+      readBool('reverbEnabled', reverbEnabled),
+      (v) => reverbEnabled = v,
+    );
+    set(
+      reverbAmount,
+      readDouble('reverbAmount', reverbAmount, 0, 1),
+      (v) => reverbAmount = v,
+    );
+
     set(
       scanSubdirectories,
       readBool('scanSubdirectories', scanSubdirectories),
@@ -240,11 +299,10 @@ class SettingsService extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------
-  // Setters inmediatos (para PlaybackService / idioma)
+  // Setters inmediatos (para PlaybackService / idioma / efectos)
   // ------------------------------------------------------------------
 
-  /// Cambia el preamp global y notifica de inmediato a los listeners
-  /// (PlaybackService lo leerá en la siguiente pista sin esperar al watcher).
+  /// Cambia el preamp global y notifica de inmediato a los listeners.
   void setReplayGainPreamp(double value) {
     final clamped = value.clamp(-12.0, 12.0).toDouble();
     if (replayGainPreamp == clamped) return;
@@ -259,12 +317,46 @@ class SettingsService extends ChangeNotifier {
     _notifyIfAlive();
   }
 
-  /// [NUEVO] Cambia el idioma y notifica de inmediato para que
-  /// `MaterialApp` reconstruya con el nuevo `Locale` sin esperar al disco.
+  /// Cambia el idioma y notifica de inmediato para que `MaterialApp`
+  /// reconstruya con el nuevo `Locale` sin esperar al disco.
   void setLanguage(AppLanguage value) {
     if (language == value) return;
     language = value;
     _notifyIfAlive();
+  }
+
+  /// Activa/desactiva el efecto "slowed". Persiste automáticamente.
+  void setSlowEnabled(bool value) {
+    if (slowEnabled == value) return;
+    slowEnabled = value;
+    _notifyIfAlive();
+    _scheduleSave();
+  }
+
+  /// Potencia del efecto "slowed" (0..1). Persiste automáticamente.
+  void setSlowAmount(double value) {
+    final clamped = value.clamp(0.0, 1.0).toDouble();
+    if (slowAmount == clamped) return;
+    slowAmount = clamped;
+    _notifyIfAlive();
+    _scheduleSave();
+  }
+
+  /// Activa/desactiva el reverb. Persiste automáticamente.
+  void setReverbEnabled(bool value) {
+    if (reverbEnabled == value) return;
+    reverbEnabled = value;
+    _notifyIfAlive();
+    _scheduleSave();
+  }
+
+  /// Potencia del reverb (0..1). Persiste automáticamente.
+  void setReverbAmount(double value) {
+    final clamped = value.clamp(0.0, 1.0).toDouble();
+    if (reverbAmount == clamped) return;
+    reverbAmount = clamped;
+    _notifyIfAlive();
+    _scheduleSave();
   }
 
   // ------------------------------------------------------------------
@@ -284,6 +376,10 @@ class SettingsService extends ChangeNotifier {
       'fadeOutEnabled': fadeOutEnabled,
       'fadeInDuration': fadeInDuration,
       'fadeOutDuration': fadeOutDuration,
+      'slowEnabled': slowEnabled,
+      'slowAmount': slowAmount,
+      'reverbEnabled': reverbEnabled,
+      'reverbAmount': reverbAmount,
       'scanSubdirectories': scanSubdirectories,
       'scanDirectories': scanDirectories,
       'podcastDirectories': podcastDirectories,
@@ -292,12 +388,26 @@ class SettingsService extends ChangeNotifier {
     };
   }
 
+  void _scheduleSave() {
+    if (_disposed) return;
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 400), () {
+      _saveDebounce = null;
+      unawaited(save());
+    });
+  }
+
   /// Escribe los valores actuales en disco.
   Future<void> save() async {
     if (_disposed) return;
+
+    _saveDebounce?.cancel();
+    _saveDebounce = null;
+
     try {
       final file = await _settingsFile();
       final json = const JsonEncoder.withIndent('  ').convert(serialize());
+      _lastWrittenContent = json;
       await file.writeAsString(json, flush: true);
       _notifyIfAlive();
     } catch (e) {
@@ -309,6 +419,7 @@ class SettingsService extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _debounce?.cancel();
+    _saveDebounce?.cancel();
     _watcher?.cancel();
     super.dispose();
   }

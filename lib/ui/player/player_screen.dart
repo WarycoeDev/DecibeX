@@ -9,10 +9,9 @@ import '../app_theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../../core/services/playback_service.dart';
 import '../../core/services/playback_queue.dart';
+import '../../core/services/settings_service.dart';
 import '../../core/models/song.dart';
 import '../../core/services/library_scanner.dart';
-
-enum _PlaybackMenuAction { toggleShuffle, repeatOff, repeatOne, repeatAll }
 
 enum _LayoutSize { compact, medium, expanded }
 
@@ -39,6 +38,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     PlaybackService.instance.removeListener(_onPlaybackChanged);
     super.dispose();
+  }
+
+  /// Textos de los efectos. Cuando quieras, muévelos a los .arb y
+  /// reemplaza las llamadas por `l10n.xxx`.
+  String _tr(String es, String en) {
+    return Localizations.localeOf(context).languageCode == 'es' ? es : en;
   }
 
   _LayoutSize _layoutFor(double width) {
@@ -93,7 +98,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   double _statusBarHeight(BuildContext context) {
-    return MediaQueryData.fromView(View.of(context)).padding.top;
+    return MediaQuery.paddingOf(context).top;
   }
 
   bool _isFavorite(Song? song) {
@@ -112,23 +117,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     unawaited(PlaybackService.instance.setRepeatMode(mode));
   }
 
-  void _handlePlaybackMenuSelection(_PlaybackMenuAction action) {
-    final playback = PlaybackService.instance;
+  /// `true` si slowed o reverb están activados.
+  bool get _effectsActive {
+    final settings = SettingsService.instance;
+    return settings.slowEnabled || settings.reverbEnabled;
+  }
 
-    switch (action) {
-      case _PlaybackMenuAction.toggleShuffle:
-        unawaited(playback.toggleShuffle());
-        break;
-      case _PlaybackMenuAction.repeatOff:
-        _setRepeatMode(LoopMode.off);
-        break;
-      case _PlaybackMenuAction.repeatOne:
-        _setRepeatMode(LoopMode.one);
-        break;
-      case _PlaybackMenuAction.repeatAll:
-        _setRepeatMode(LoopMode.all);
-        break;
-    }
+  /// Icono del botón de opciones de reproducción: aleatorio > repetición >
+  /// efectos > repetición (apagado).
+  IconData _playbackOptionsIcon({
+    required bool shuffle,
+    required LoopMode repeat,
+  }) {
+    if (shuffle) return Icons.shuffle_rounded;
+
+    return switch (repeat) {
+      LoopMode.one => Icons.repeat_one_rounded,
+      LoopMode.all => Icons.repeat_rounded,
+      LoopMode.off =>
+        _effectsActive ? Icons.graphic_eq_rounded : Icons.repeat_rounded,
+    };
   }
 
   @override
@@ -142,6 +150,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             PlaybackService.instance,
             PlaybackQueue.instance,
             LibraryScanner.instance,
+            SettingsService.instance,
           ]),
           builder: (context, child) {
             final playback = PlaybackService.instance;
@@ -324,13 +333,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final favorite = _isFavorite(song);
     final shuffle = playback.shuffleEnabled;
     final repeat = playback.repeatMode;
-    final active = shuffle || repeat != LoopMode.off;
-
-    final repeatIcon = switch (repeat) {
-      LoopMode.one => Icons.repeat_one_rounded,
-      LoopMode.all => Icons.repeat_rounded,
-      LoopMode.off => Icons.repeat_rounded,
-    };
+    final effects = _effectsActive;
+    final active = shuffle || repeat != LoopMode.off || effects;
+    final optionsIcon = _playbackOptionsIcon(shuffle: shuffle, repeat: repeat);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -365,15 +370,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           IconButton(
             tooltip: l10n.playbackOptions,
-            onPressed: () => _showPlaybackOptionsSheet(
-              shuffleEnabled: shuffle,
-              repeatMode: repeat,
-            ),
+            onPressed: _showPlaybackOptionsSheet,
             icon: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
               child: Icon(
-                shuffle ? Icons.shuffle_rounded : repeatIcon,
-                key: ValueKey<String>('$shuffle-$repeat'),
+                optionsIcon,
+                key: ValueKey<String>('$shuffle-$repeat-$effects'),
                 size: 27,
                 color: active ? AppTheme.accent : AppTheme.textSecondary,
               ),
@@ -808,11 +810,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required LoopMode repeatMode,
   }) {
     final l10n = context.l10n;
-    final repeatIcon = switch (repeatMode) {
-      LoopMode.one => Icons.repeat_one_rounded,
-      LoopMode.all => Icons.repeat_rounded,
-      LoopMode.off => Icons.repeat_rounded,
-    };
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -832,7 +829,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: _buildPlaybackOptionsButton(
               shuffleEnabled: shuffleEnabled,
               repeatMode: repeatMode,
-              repeatIcon: repeatIcon,
             ),
           ),
           Expanded(
@@ -850,16 +846,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildPlaybackOptionsButton({
     required bool shuffleEnabled,
     required LoopMode repeatMode,
-    required IconData repeatIcon,
   }) {
     final l10n = context.l10n;
-    final isActive = shuffleEnabled || repeatMode != LoopMode.off;
+    final isActive =
+        shuffleEnabled || repeatMode != LoopMode.off || _effectsActive;
+    final icon = _playbackOptionsIcon(
+      shuffle: shuffleEnabled,
+      repeat: repeatMode,
+    );
 
     return InkWell(
-      onTap: () => _showPlaybackOptionsSheet(
-        shuffleEnabled: shuffleEnabled,
-        repeatMode: repeatMode,
-      ),
+      onTap: _showPlaybackOptionsSheet,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -867,7 +864,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              shuffleEnabled ? Icons.shuffle_rounded : repeatIcon,
+              icon,
               size: 22,
               color: isActive ? AppTheme.accent : AppTheme.textSecondary,
             ),
@@ -889,25 +886,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  void _showPlaybackOptionsSheet({
-    required bool shuffleEnabled,
-    required LoopMode repeatMode,
-  }) {
+  void _showPlaybackOptionsSheet() {
     final l10n = context.l10n;
 
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.surface,
       useSafeArea: true,
+      isScrollControlled: true,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
         return AnimatedBuilder(
-          animation: PlaybackService.instance,
+          animation: Listenable.merge([
+            PlaybackService.instance,
+            SettingsService.instance,
+          ]),
           builder: (context, _) {
             final playback = PlaybackService.instance;
+            final settings = SettingsService.instance;
 
             Widget buildOption({
               required IconData icon,
@@ -958,58 +957,92 @@ class _PlayerScreenState extends State<PlayerScreen> {
               );
             }
 
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          l10n.playback,
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w600,
+            final slowSpeed = SettingsService.speedForAmount(
+              settings.slowAmount,
+            );
+
+            return SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.playback,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: l10n.close,
-                        onPressed: () => Navigator.pop(sheetContext),
-                        icon: const Icon(Icons.close_rounded, size: 21),
-                      ),
-                    ],
-                  ),
-                  buildSectionTitle(l10n.shuffle.toUpperCase()),
-                  buildOption(
-                    icon: Icons.shuffle_rounded,
-                    title: l10n.shuffle,
-                    selected: playback.shuffleEnabled,
-                    onTap: () => unawaited(playback.toggleShuffle()),
-                  ),
-                  buildSectionTitle(l10n.repeatSection),
-                  buildOption(
-                    icon: Icons.repeat_rounded,
-                    title: l10n.repeatOff,
-                    selected: playback.repeatMode == LoopMode.off,
-                    onTap: () => _setRepeatMode(LoopMode.off),
-                  ),
-                  buildOption(
-                    icon: Icons.repeat_one_rounded,
-                    title: l10n.repeatSong,
-                    selected: playback.repeatMode == LoopMode.one,
-                    onTap: () => _setRepeatMode(LoopMode.one),
-                  ),
-                  buildOption(
-                    icon: Icons.repeat_rounded,
-                    title: l10n.repeatQueue,
-                    selected: playback.repeatMode == LoopMode.all,
-                    onTap: () => _setRepeatMode(LoopMode.all),
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                        IconButton(
+                          tooltip: l10n.close,
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close_rounded, size: 21),
+                        ),
+                      ],
+                    ),
+                    buildSectionTitle(l10n.shuffle.toUpperCase()),
+                    buildOption(
+                      icon: Icons.shuffle_rounded,
+                      title: l10n.shuffle,
+                      selected: playback.shuffleEnabled,
+                      onTap: () => unawaited(playback.toggleShuffle()),
+                    ),
+                    buildSectionTitle(l10n.repeatSection),
+                    buildOption(
+                      icon: Icons.repeat_rounded,
+                      title: l10n.repeatOff,
+                      selected: playback.repeatMode == LoopMode.off,
+                      onTap: () => _setRepeatMode(LoopMode.off),
+                    ),
+                    buildOption(
+                      icon: Icons.repeat_one_rounded,
+                      title: l10n.repeatSong,
+                      selected: playback.repeatMode == LoopMode.one,
+                      onTap: () => _setRepeatMode(LoopMode.one),
+                    ),
+                    buildOption(
+                      icon: Icons.repeat_rounded,
+                      title: l10n.repeatQueue,
+                      selected: playback.repeatMode == LoopMode.all,
+                      onTap: () => _setRepeatMode(LoopMode.all),
+                    ),
+                    buildSectionTitle(_tr('EFECTOS', 'EFFECTS')),
+                    _EffectControl(
+                      icon: Icons.slow_motion_video_rounded,
+                      title: _tr('Slowed (más lento)', 'Slowed'),
+                      valueLabel: '${slowSpeed.toStringAsFixed(2)}x',
+                      enabled: settings.slowEnabled,
+                      amount: settings.slowAmount,
+                      onToggle: settings.setSlowEnabled,
+                      onChanged: settings.setSlowAmount,
+                      onChangeEnd: (_) => unawaited(settings.save()),
+                    ),
+                    _EffectControl(
+                      icon: Icons.blur_on_rounded,
+                      title: 'Reverb',
+                      valueLabel: '${(settings.reverbAmount * 100).round()}%',
+                      enabled: settings.reverbEnabled,
+                      amount: settings.reverbAmount,
+                      available: playback.reverbSupported,
+                      hint: playback.reverbSupported
+                          ? null
+                          : _tr(
+                              'Solo disponible en Android',
+                              'Only available on Android',
+                            ),
+                      onToggle: settings.setReverbEnabled,
+                      onChanged: settings.setReverbAmount,
+                      onChangeEnd: (_) => unawaited(settings.save()),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
               ),
             );
           },
@@ -1274,6 +1307,121 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Fila de un efecto: icono, nombre, valor, interruptor y slider de potencia.
+class _EffectControl extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String valueLabel;
+  final bool enabled;
+  final double amount;
+  final bool available;
+  final String? hint;
+  final ValueChanged<bool> onToggle;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  const _EffectControl({
+    required this.icon,
+    required this.title,
+    required this.valueLabel,
+    required this.enabled,
+    required this.amount,
+    required this.onToggle,
+    required this.onChanged,
+    required this.onChangeEnd,
+    this.available = true,
+    this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final active = enabled && available;
+    final disabledTrack = AppTheme.textSecondary.withValues(alpha: 0.25);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                icon,
+                size: 21,
+                color: active ? AppTheme.accent : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: active
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: active ? AppTheme.accent : null,
+                      ),
+                    ),
+                    if (hint != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          hint!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Text(
+                valueLabel,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: active ? AppTheme.accent : AppTheme.textSecondary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Switch(
+                value: active,
+                onChanged: available ? onToggle : null,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 4,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              activeTrackColor: AppTheme.accent,
+              inactiveTrackColor: AppTheme.surfaceVariant,
+              thumbColor: AppTheme.accent,
+              overlayColor: AppTheme.accent.withValues(alpha: 0.15),
+              disabledActiveTrackColor: disabledTrack,
+              disabledInactiveTrackColor: disabledTrack,
+              disabledThumbColor: AppTheme.textSecondary.withValues(alpha: 0.5),
+            ),
+            child: Slider(
+              value: amount.clamp(0.0, 1.0).toDouble(),
+              min: 0,
+              max: 1,
+              onChanged: active ? onChanged : null,
+              onChangeEnd: active ? onChangeEnd : null,
+            ),
+          ),
+        ],
       ),
     );
   }

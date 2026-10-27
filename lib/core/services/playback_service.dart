@@ -3,7 +3,10 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:flutter_soloud/flutter_soloud.dart';
+// just_audio ya no reproduce nada: solo se conservan sus enums para no
+// romper el resto de la app (PlayerScreen y otros usan LoopMode).
+import 'package:just_audio/just_audio.dart' show LoopMode, ProcessingState;
 
 import '../models/song.dart';
 import 'fade_index.dart';
@@ -12,119 +15,32 @@ import 'settings_service.dart';
 import 'statistics_service.dart';
 import 'podcast_statistics_service.dart';
 
+/// Servicio de reproducción sobre flutter_soloud (SoLoud + miniaudio).
+///
+/// Se eligió SoLoud porque, a diferencia de just_audio, trae reverb
+/// (freeverb) y velocidad con cambio de tono integrados y funciona igual en
+/// Android, iOS, Windows, macOS y Linux, sin código nativo propio.
 class PlaybackService extends ChangeNotifier {
   PlaybackService._() {
-    _player.playerStateStream.listen((state) {
-      _isPlaying = state.playing;
-
-      if (state.processingState != ProcessingState.completed) {
-        _completionHandled = false;
-      } else if (!_completionHandled) {
-        _completionHandled = true;
-        unawaited(_handleTrackCompleted());
-      }
-
-      if (!_isPlaying && _seekTarget != null) {
-        _seekStartedAt = null;
-      }
-
-      // Si el player deja de reproducir, el "audio confirmado" ya no aplica
-      // hasta que vuelva a sonar.
-      if (!_isPlaying) {
-        _audioConfirmed = false;
-      }
-
-      _syncFadeTimer();
-      notifyListeners();
-    });
-
-    _player.positionStream.listen((value) {
-      final target = _seekTarget;
-
-      if (target != null) {
-        final isCloseToTarget =
-            (value.inMilliseconds - target.inMilliseconds).abs() <= 1000;
-
-        if (_isPlaying) {
-          final startedAt = _seekStartedAt;
-          final isRecent =
-              startedAt != null &&
-              DateTime.now().difference(startedAt) <
-                  const Duration(milliseconds: 1500);
-
-          if (isCloseToTarget) {
-            _seekTarget = null;
-          } else if (isRecent) {
-            return;
-          } else {
-            _seekTarget = null;
-          }
-        } else if (!isCloseToTarget) {
-          return;
-        }
-      }
-
-      // Primer tick con posición real > 0: el audio ya está fluyendo de
-      // verdad. A partir de aquí el fade in puede calcular con posición
-      // fiable (antes, forzamos 0.0 absoluto).
-      if (value > Duration.zero) {
-        _audioConfirmed = true;
-      }
-
-      _position = value;
-
-      StatisticsService.instance.onPositionChanged(value);
-      PodcastStatisticsService.instance.onPositionChanged(value);
-
-      // Empuja el timer si hacía falta (p. ej. audio confirmado tras play).
-      _syncFadeTimer();
-
-      notifyListeners();
-    });
-
-    _player.durationStream.listen((value) {
-      _duration = value ?? Duration.zero;
-      PodcastStatisticsService.instance.onDurationChanged(_duration);
-      notifyListeners();
-    });
-
-    _player.sequenceStateStream.listen((sequenceState) {
-      final taggedSong = sequenceState.currentSource?.tag;
-
-      if (taggedSong is Song) {
-        final changed =
-            _currentSong == null || !_sameSong(_currentSong!, taggedSong);
-
-        _currentSong = taggedSong;
-        _currentQueueIndex = _indexOfSong(_playingSongs, taggedSong);
-
-        if (changed) {
-          _position = Duration.zero;
-          _seekTarget = null;
-          _seekStartedAt = null;
-          _audioConfirmed = false;
-
-          StatisticsService.instance.onSongChanged(taggedSong);
-          PodcastStatisticsService.instance.onSongChanged(taggedSong);
-        }
-      }
-
-      notifyListeners();
-    });
-
-    _player.errorStream.listen((error) {
-      debugPrint('[PlaybackService] Error de audio: $error');
-    });
-
-    // Cambios de preamp / ReplayGain / fades se aplican a la pista actual
-    // al instante (sin esperar a la siguiente canción).
+    // Cambios de preamp / ReplayGain / fades / slow / reverb se aplican a la
+    // pista actual al instante (sin esperar a la siguiente canción).
     SettingsService.instance.addListener(_onSettingsChanged);
   }
 
   static final PlaybackService instance = PlaybackService._();
 
-  final AudioPlayer _player = AudioPlayer();
   final Random _random = Random();
+
+  SoLoud get _soloud => SoLoud.instance;
+
+  // --- Motor / voz actual ---
+  Future<void>? _engineInit;
+  AudioSource? _source;
+  SoundHandle? _handle;
+
+  /// Se incrementa en cada carga; permite descartar cargas obsoletas si el
+  /// usuario cambia de pista mientras otra todavía se está preparando.
+  int _loadToken = 0;
 
   List<Song> _playingSongs = [];
   List<Song> _shuffleOrder = [];
@@ -136,36 +52,41 @@ class PlaybackService extends ChangeNotifier {
   bool _isPlaying = false;
   bool _isLoading = false;
   bool _shuffleEnabled = false;
-  bool _completionHandled = false;
   bool _handlingCompletion = false;
-
-  /// `true` cuando el `positionStream` ha reportado una posición > 0
-  /// desde el último `play()`. Hasta entonces, el fade in se fuerza a 0.0
-  /// absoluto para tapar el jitter entre `play()` y el primer buffer
-  /// audible (evita escuchar un "tramito" a volumen pleno).
-  bool _audioConfirmed = false;
 
   int _currentQueueIndex = -1;
   int _shuffleCursor = -1;
 
   LoopMode _repeatMode = LoopMode.off;
 
-  Duration? _seekTarget;
-  DateTime? _seekStartedAt;
+  // --- Ticker: posición, fades y fin de pista ---
+
+  /// Frecuencia con la que se lee la posición y se reevalúa el volumen.
+  static const Duration _tick = Duration(milliseconds: 40);
+
+  /// Cada cuánto se notifica la posición a la UI y a las estadísticas.
+  static const Duration _positionNotifyEvery = Duration(milliseconds: 150);
+
+  Timer? _ticker;
+  DateTime _lastPositionNotify = DateTime.fromMillisecondsSinceEpoch(0);
 
   // --- Volumen / fades ---
 
-  /// Último volumen enviado al reproductor (-1 = desconocido).
+  /// Último volumen enviado a la voz actual (-1 = desconocido).
   double _lastAppliedVolume = -1;
-
-  /// Frecuencia con la que se reevalúa el volumen mientras suena la pista.
-  static const Duration _fadeTick = Duration(milliseconds: 40);
-  Timer? _fadeTimer;
 
   /// Índice "posición → ganancia" y la clave (fadeIn ms, fadeOut ms,
   /// duración ms) con la que se construyó.
   FadeIndex? _fadeIndex;
   (int, int, int)? _fadeIndexKey;
+
+  // --- Slowed + Reverb ---
+  double _lastSpeed = 1.0;
+  bool _reverbActive = false;
+
+  /// Archivos de más de este tamaño se leen desde disco en vez de memoria
+  /// (pensado para podcasts largos).
+  static const int _diskLoadThresholdBytes = 64 * 1024 * 1024;
 
   Song? get currentSong => _currentSong;
   Duration get position => _position;
@@ -174,10 +95,23 @@ class PlaybackService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get shuffleEnabled => _shuffleEnabled;
   LoopMode get repeatMode => _repeatMode;
-  ProcessingState get processingState => _player.processingState;
-  Duration get bufferedPosition => _player.bufferedPosition;
-  double get speed => _player.speed;
   List<Song> get playingSongs => List.unmodifiable(_playingSongs);
+
+  /// Velocidad de reproducción vigente (1.0 = normal).
+  double get speed => _lastSpeed;
+
+  /// Los archivos son locales: se considera todo "bufferizado".
+  Duration get bufferedPosition => _duration;
+
+  ProcessingState get processingState {
+    if (_currentSong == null) return ProcessingState.idle;
+    if (_isLoading) return ProcessingState.loading;
+    if (_handle == null) return ProcessingState.completed;
+    return ProcessingState.ready;
+  }
+
+  /// SoLoud trae reverb en todas las plataformas.
+  bool get reverbSupported => true;
 
   int? get currentIndex => _currentQueueIndex >= 0 ? _currentQueueIndex : null;
 
@@ -216,9 +150,9 @@ class PlaybackService extends ChangeNotifier {
   }
 
   void _onSettingsChanged() {
-    _syncFadeTimer();
+    _applyPlaybackEffects();
 
-    if (_currentSong == null) return;
+    if (_currentSong == null || _handle == null) return;
     unawaited(_applyVolume());
   }
 
@@ -239,14 +173,6 @@ class PlaybackService extends ChangeNotifier {
 
   int _indexOfSong(List<Song> songs, Song song) {
     return songs.indexWhere((item) => _sameSong(item, song));
-  }
-
-  Song? _songAt(int index) {
-    if (index < 0 || index >= _playingSongs.length) {
-      return null;
-    }
-
-    return _playingSongs[index];
   }
 
   void _buildShuffleOrder({Song? keepCurrentFirst}) {
@@ -355,9 +281,6 @@ class PlaybackService extends ChangeNotifier {
     _shuffleCursor = -1;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _seekTarget = null;
-    _seekStartedAt = null;
-    _audioConfirmed = false;
 
     if (_shuffleEnabled) {
       _buildShuffleOrder();
@@ -385,6 +308,158 @@ class PlaybackService extends ChangeNotifier {
   }
 
   // ===========================================================================
+  // MOTOR
+  // ===========================================================================
+
+  Future<void> _ensureEngine() {
+    if (_soloud.isInitialized) return Future<void>.value();
+
+    return _engineInit ??= _soloud.init().whenComplete(() {
+      _engineInit = null;
+    });
+  }
+
+  /// Detiene y libera la voz y la fuente actuales.
+  Future<void> _releaseVoice() async {
+    final source = _source;
+
+    _handle = null;
+    _source = null;
+    _lastAppliedVolume = -1;
+    _syncTicker();
+
+    if (source != null) {
+      try {
+        // Al liberar la fuente también se detienen sus voces.
+        await _soloud.disposeSource(source);
+      } catch (error) {
+        debugPrint('[PlaybackService] Error liberando la fuente: $error');
+      }
+    }
+  }
+
+  Duration _livePosition() {
+    final handle = _handle;
+    if (handle == null) return _position;
+
+    try {
+      return _soloud.getPosition(handle);
+    } catch (_) {
+      return _position;
+    }
+  }
+
+  // ===========================================================================
+  // TICKER · posición, fades y fin de pista
+  // ===========================================================================
+
+  /// El ticker corre solo mientras hay una voz sonando.
+  void _syncTicker() {
+    final needed = _handle != null && _isPlaying;
+
+    if (needed) {
+      _ticker ??= Timer.periodic(_tick, (_) => _onTick());
+    } else {
+      _ticker?.cancel();
+      _ticker = null;
+    }
+  }
+
+  void _onTick() {
+    final handle = _handle;
+
+    if (handle == null || !_isPlaying || _isLoading) return;
+
+    // La voz deja de ser válida cuando la pista termina.
+    if (!_soloud.getIsValidVoiceHandle(handle)) {
+      _handle = null;
+      _syncTicker();
+      unawaited(_handleTrackCompleted());
+      return;
+    }
+
+    final position = _livePosition();
+    _position = position;
+
+    final settings = SettingsService.instance;
+    if (settings.fadeInEnabled || settings.fadeOutEnabled) {
+      unawaited(_applyVolume(at: position));
+    }
+
+    final now = DateTime.now();
+
+    if (now.difference(_lastPositionNotify) >= _positionNotifyEvery) {
+      _lastPositionNotify = now;
+
+      StatisticsService.instance.onPositionChanged(position);
+      PodcastStatisticsService.instance.onPositionChanged(position);
+
+      notifyListeners();
+    }
+  }
+
+  // ===========================================================================
+  // SLOWED + REVERB
+  //
+  // - Slowed: velocidad y tono bajan juntos (efecto "cinta"): SoLoud cambia
+  //   ambos con setRelativePlaySpeed. La velocidad sale de
+  //   SettingsService.effectiveSpeed (1.0 → 0.65x según el slider).
+  // - Reverb: filtro freeverb global de SoLoud. Se activa solo mientras el
+  //   reverb está habilitado.
+  // ===========================================================================
+
+  void _applyPlaybackEffects() {
+    _applySpeed();
+    _applyReverb();
+  }
+
+  void _applySpeed() {
+    final handle = _handle;
+    if (handle == null) return;
+
+    final speed = SettingsService.instance.effectiveSpeed;
+    if ((speed - _lastSpeed).abs() < 0.0005) return;
+
+    try {
+      _soloud.setRelativePlaySpeed(handle, speed);
+      _lastSpeed = speed;
+    } catch (error) {
+      debugPrint('[PlaybackService] No se pudo cambiar la velocidad: $error');
+    }
+  }
+
+  void _applyReverb() {
+    if (!_soloud.isInitialized) return;
+
+    final settings = SettingsService.instance;
+    final amount = settings.reverbEnabled ? settings.reverbAmount : 0.0;
+
+    try {
+      final reverb = _soloud.filters.freeverbFilter;
+
+      if (amount <= 0.001) {
+        if (_reverbActive) {
+          reverb.deactivate();
+          _reverbActive = false;
+        }
+        return;
+      }
+
+      if (!_reverbActive) {
+        reverb.activate();
+        _reverbActive = true;
+      }
+
+      // amount 0..1 → mezcla húmeda 10-55 % y sala mediana-grande.
+      reverb.wet.value = 0.10 + amount * 0.45;
+      reverb.roomSize.value = 0.60 + amount * 0.35;
+      reverb.width.value = 1.0;
+    } catch (error) {
+      debugPrint('[PlaybackService] No se pudo aplicar el reverb: $error');
+    }
+  }
+
+  // ===========================================================================
   // VOLUMEN · FADE IN / FADE OUT
   //
   // El volumen final es siempre:
@@ -393,25 +468,35 @@ class PlaybackService extends ChangeNotifier {
   //
   // Al depender solo de la posición (no del tiempo transcurrido), el seek, la
   // pausa y la reanudación funcionan sin lógica adicional. La duración de
-  // cada fade sale de SettingsService.
+  // cada fade sale de SettingsService (ajustada a la velocidad actual para que
+  // el fade dure lo configurado en tiempo real aunque la pista vaya lenta).
   // ===========================================================================
 
-  /// Envía un volumen al reproductor sin ninguna comprobación.
+  /// Envía un volumen a la voz actual sin ninguna comprobación.
   Future<void> _setVolumeRaw(double volume) async {
     _lastAppliedVolume = volume;
-    await _player.setVolume(volume);
+
+    final handle = _handle;
+    if (handle == null) return;
+
+    try {
+      _soloud.setVolume(handle, volume);
+    } catch (error) {
+      debugPrint('[PlaybackService] No se pudo cambiar el volumen: $error');
+    }
   }
 
   /// Devuelve el índice vigente, reconstruyéndolo si cambió la duración de
-  /// algún fade (settings) o la duración de la pista.
+  /// algún fade (settings), la velocidad o la duración de la pista.
   FadeIndex? _currentFadeIndex() {
     final settings = SettingsService.instance;
+    final speed = settings.effectiveSpeed;
 
     final inMs = settings.fadeInEnabled
-        ? (settings.fadeInDuration * 1000).round()
+        ? (settings.fadeInDuration * 1000 * speed).round()
         : 0;
     final outMs = settings.fadeOutEnabled
-        ? (settings.fadeOutDuration * 1000).round()
+        ? (settings.fadeOutDuration * 1000 * speed).round()
         : 0;
 
     if (inMs <= 0 && outMs <= 0) return null;
@@ -446,23 +531,12 @@ class PlaybackService extends ChangeNotifier {
   }
 
   /// Calcula y aplica el volumen que toca en [at] (por defecto, la posición
-  /// real del reproductor). Solo llama al plugin si el valor cambió.
+  /// real de la voz). Solo llama al motor si el valor cambió.
   Future<void> _applyVolume({Duration? at, bool force = false}) async {
     final song = _currentSong;
-    if (song == null) return;
+    if (song == null || _handle == null) return;
 
-    // Mientras no haya confirmación de audio real (primer positionStream
-    // con posición > 0), forzamos silencio absoluto. Esto tapa el hueco
-    // entre play() y el primer buffer audible, donde el player reporta
-    // position = 0 pero el DAC ya puede estar sonando.
-    if (!_audioConfirmed && _isPlaying) {
-      if (_lastAppliedVolume != 0.0) {
-        await _setVolumeRaw(0.0);
-      }
-      return;
-    }
-
-    final position = at ?? _player.position;
+    final position = at ?? _livePosition();
     final fadeGain = _currentFadeIndex()?.gainAt(position) ?? 1.0;
     final target = (_baseVolume(song) * fadeGain).clamp(0.0, 4.0).toDouble();
 
@@ -480,22 +554,6 @@ class PlaybackService extends ChangeNotifier {
     await _setVolumeRaw(target);
   }
 
-  /// El timer corre solo mientras suena la pista y hay algún fade activo.
-  void _syncFadeTimer() {
-    final settings = SettingsService.instance;
-    final needed =
-        _isPlaying && (settings.fadeInEnabled || settings.fadeOutEnabled);
-
-    if (needed) {
-      _fadeTimer ??= Timer.periodic(_fadeTick, (_) {
-        unawaited(_applyVolume());
-      });
-    } else {
-      _fadeTimer?.cancel();
-      _fadeTimer = null;
-    }
-  }
-
   // ===========================================================================
   // REPRODUCCIÓN
   // ===========================================================================
@@ -508,14 +566,15 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
 
-    _completionHandled = false;
-    _seekTarget = null;
-    _seekStartedAt = null;
+    final token = ++_loadToken;
+
+    // Se libera la pista anterior antes de tocar el estado.
+    await _releaseVoice();
+
     _position = Duration.zero;
     _duration = Duration.zero;
     _currentSong = song;
     _currentQueueIndex = _indexOfSong(_playingSongs, song);
-    _audioConfirmed = false;
 
     StatisticsService.instance.onSongChanged(song);
     PodcastStatisticsService.instance.onSongChanged(song);
@@ -536,43 +595,66 @@ class PlaybackService extends ChangeNotifier {
         ? PodcastStatisticsService.instance.resumePositionFor(song)
         : Duration.zero;
 
-    // Silencio absoluto ANTES de cargar la nueva fuente.
-    await _setVolumeRaw(0.0);
+    try {
+      await _ensureEngine();
 
-    final loadedDuration = await _player.setAudioSource(
-      AudioSource.file(path, tag: song),
-      initialPosition: initialPosition,
-    );
-
-    // Con la duración conocida ya se puede construir el índice completo.
-    if (loadedDuration != null) {
-      _duration = loadedDuration;
-    }
-
-    // Volumen que toca en la posición inicial. Con el nuevo FadeIndex, la
-    // posición 0 (o la inicial de un podcast reanudado) cae ya dentro del
-    // guard de silencio inicial, así que esto es 0.0 absoluto si hay fade
-    // in; si no hay fade in, es el volumen base.
-    await _applyVolume(at: initialPosition, force: true);
-
-    // Aseguramos que el player está listo antes de arrancar: si está
-    // "loading", el primer buffer puede tardar y el volumen 0 ya está
-    // aplicado, así que esperar aquí es seguro y evita carreras.
-    if (_player.processingState == ProcessingState.loading) {
-      await _player.processingStateStream.firstWhere(
-        (s) => s != ProcessingState.loading,
+      final fileSize = await File(path).length();
+      final source = await _soloud.loadFile(
+        path,
+        mode: fileSize > _diskLoadThresholdBytes
+            ? LoadMode.disk
+            : LoadMode.memory,
       );
-    }
 
-    // El Future de play() solo se completa cuando la canción se pausa o
-    // termina. Si se espera con await, _isLoading (y _handlingCompletion)
-    // se quedan en true durante toda la canción y los botones de
-    // anterior/siguiente permanecen deshabilitados.
-    unawaited(
-      _player.play().catchError((Object error) {
-        debugPrint('[PlaybackService] Error al reproducir: $error');
-      }),
-    );
+      // Mientras cargaba, el usuario eligió otra pista: se descarta esta.
+      if (token != _loadToken) {
+        try {
+          await _soloud.disposeSource(source);
+        } catch (_) {}
+        return;
+      }
+
+      _source = source;
+      _duration = _soloud.getLength(source);
+      PodcastStatisticsService.instance.onDurationChanged(_duration);
+
+      // La voz nace en pausa y a volumen 0: seek, velocidad y volumen se
+      // dejan listos ANTES de que suene el primer sample (sin "tramitos" a
+      // volumen pleno ni saltos de velocidad).
+      final handle = _soloud.play(source, volume: 0.0, paused: true);
+
+      if (token != _loadToken) {
+        await _releaseVoice();
+        return;
+      }
+
+      _handle = handle;
+      _lastSpeed = 1.0; // una voz nueva siempre arranca a velocidad normal
+      _lastAppliedVolume = 0.0;
+
+      if (initialPosition > Duration.zero) {
+        try {
+          _soloud.seek(handle, initialPosition);
+          _position = initialPosition;
+        } catch (error) {
+          debugPrint('[PlaybackService] No se pudo reanudar: $error');
+        }
+      }
+
+      _applyPlaybackEffects();
+      await _applyVolume(at: initialPosition, force: true);
+
+      _soloud.setPause(handle, false);
+      _isPlaying = true;
+      _lastPositionNotify = DateTime.fromMillisecondsSinceEpoch(0);
+      _syncTicker();
+      notifyListeners();
+    } catch (error) {
+      _isPlaying = false;
+      _syncTicker();
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> appendToPlaybackQueue(Song song) async {
@@ -702,33 +784,44 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> pause() async {
-    await _player.pause();
+    final handle = _handle;
+
+    if (handle != null) {
+      _position = _livePosition();
+      _soloud.setPause(handle, true);
+    }
+
+    _isPlaying = false;
+    _syncTicker();
+    notifyListeners();
+
     await PodcastStatisticsService.instance.flush();
   }
 
   Future<void> resume() async {
-    if (_playingSongs.isNotEmpty && _currentSong != null) {
-      if (_player.processingState == ProcessingState.completed) {
-        await _loadAndPlaySong(_currentSong!);
-      } else {
-        // Al reanudar, el audio aún no está confirmado: forzamos 0.0 y
-        // dejamos que el primer positionStream > 0 reactive el fade.
-        _audioConfirmed = false;
-        await _setVolumeRaw(0.0);
+    if (_playingSongs.isEmpty) return;
 
-        // Volumen que toca en la posición actual (si se pausó a mitad de
-        // un fade, continúa desde ahí).
-        await _applyVolume(force: true);
-
-        unawaited(
-          _player.play().catchError((Object error) {
-            debugPrint('[PlaybackService] Error al reanudar: $error');
-          }),
-        );
-      }
-    } else if (_playingSongs.isNotEmpty) {
+    if (_currentSong == null) {
       await playQueue();
+      return;
     }
+
+    final handle = _handle;
+
+    // Sin voz = la pista terminó (o falló): se vuelve a cargar desde cero.
+    if (handle == null) {
+      await _loadAndPlaySong(_currentSong!);
+      return;
+    }
+
+    // Volumen que toca en la posición actual (si se pausó a mitad de un
+    // fade, continúa desde ahí) antes de que vuelva a sonar.
+    await _applyVolume(force: true);
+
+    _soloud.setPause(handle, false);
+    _isPlaying = true;
+    _syncTicker();
+    notifyListeners();
   }
 
   Future<void> togglePlayPause() async {
@@ -892,13 +985,10 @@ class PlaybackService extends ChangeNotifier {
     _handlingCompletion = true;
 
     try {
-      // Garantía final: la pista termina en silencio absoluto aunque el
-      // último tick del timer no haya llegado a tiempo.
-      if (SettingsService.instance.fadeOutEnabled) {
-        await _setVolumeRaw(0.0);
-      }
-
       PodcastStatisticsService.instance.onTrackCompleted();
+
+      // Libera la fuente de la pista que terminó.
+      await _releaseVoice();
 
       if (_repeatMode == LoopMode.one) {
         await _loadAndPlaySong(_currentSong!);
@@ -912,7 +1002,7 @@ class PlaybackService extends ChangeNotifier {
       } else {
         _isPlaying = false;
         _position = _duration;
-        _syncFadeTimer();
+        _syncTicker();
         notifyListeners();
       }
     } catch (error) {
@@ -923,43 +1013,42 @@ class PlaybackService extends ChangeNotifier {
   }
 
   Future<void> seek(Duration position) async {
-    _seekTarget = position;
-    _seekStartedAt = DateTime.now();
-    _position = position;
+    final handle = _handle;
+    if (handle == null) return;
 
-    StatisticsService.instance.onSeek(position);
-    PodcastStatisticsService.instance.onSeek(position);
+    var target = position;
 
-    // Al hacer seek a una posición > 0, consideramos el audio confirmado
-    // (si ya estaba sonando). Si no estábamos reproduciendo, no aplica.
-    if (_isPlaying && position > Duration.zero) {
-      _audioConfirmed = true;
+    if (target < Duration.zero) target = Duration.zero;
+    if (_duration > Duration.zero && target > _duration) target = _duration;
+
+    try {
+      _soloud.seek(handle, target);
+    } catch (error) {
+      debugPrint('[PlaybackService] No se pudo hacer seek: $error');
+      return;
     }
 
-    // Volumen que toca en la posición de destino, aplicado ya (antes de que
-    // el audio salte): al saltar dentro de un fade, suena en su nivel
-    // correcto; al saltar fuera de uno, vuelve a volumen pleno.
-    unawaited(_applyVolume(at: position));
+    _position = target;
+
+    StatisticsService.instance.onSeek(target);
+    PodcastStatisticsService.instance.onSeek(target);
+
+    // Volumen que toca en la posición de destino: al saltar dentro de un
+    // fade, suena en su nivel correcto; al saltar fuera, vuelve al pleno.
+    await _applyVolume(at: target);
 
     notifyListeners();
-
-    await _player.seek(position);
-
-    if (!_isPlaying) {
-      _position = position;
-      notifyListeners();
-    }
   }
 
   Future<void> stop() async {
-    _fadeTimer?.cancel();
-    _fadeTimer = null;
+    _loadToken++; // invalida cualquier carga en curso
+
+    _ticker?.cancel();
+    _ticker = null;
     _fadeIndex = null;
     _fadeIndexKey = null;
-    _lastAppliedVolume = -1;
-    _audioConfirmed = false;
 
-    await _player.stop();
+    await _releaseVoice();
 
     _playingSongs = [];
     _shuffleOrder = [];
@@ -970,10 +1059,8 @@ class PlaybackService extends ChangeNotifier {
     _duration = Duration.zero;
     _isPlaying = false;
     _isLoading = false;
-    _completionHandled = false;
     _handlingCompletion = false;
-    _seekTarget = null;
-    _seekStartedAt = null;
+    _lastSpeed = 1.0;
 
     StatisticsService.instance.onSongChanged(null);
     PodcastStatisticsService.instance.onSongChanged(null);
@@ -984,10 +1071,10 @@ class PlaybackService extends ChangeNotifier {
 
   @override
   void dispose() {
-    _fadeTimer?.cancel();
+    _ticker?.cancel();
     SettingsService.instance.removeListener(_onSettingsChanged);
+    unawaited(_releaseVoice());
     unawaited(PodcastStatisticsService.instance.flush());
-    unawaited(_player.dispose());
     super.dispose();
   }
 }
