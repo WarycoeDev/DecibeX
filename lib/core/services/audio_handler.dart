@@ -33,7 +33,10 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> pause() => _playback.pause();
+  Future<void> pause() async {
+    await _playback.pause();
+    _publishPlaybackState();
+  }
 
   @override
   Future<void> seek(Duration position) async {
@@ -64,6 +67,29 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
+  Future<void> skipToQueueItem(int index) async {
+    final songs = _playback.playingSongs;
+    if (index < 0 || index >= songs.length) return;
+
+    await _playback.playSongFromQueue(songs[index]);
+  }
+
+  @override
+  Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) {
+    return _playback.setRepeatMode(switch (repeatMode) {
+      AudioServiceRepeatMode.one => just_audio.LoopMode.one,
+      AudioServiceRepeatMode.all ||
+      AudioServiceRepeatMode.group => just_audio.LoopMode.all,
+      AudioServiceRepeatMode.none => just_audio.LoopMode.off,
+    });
+  }
+
+  @override
+  Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) {
+    return _playback.setShuffle(shuffleMode != AudioServiceShuffleMode.none);
+  }
+
+  @override
   Future<void> stop() => _playback.stop();
 
   void _publishPlaybackState({
@@ -81,13 +107,23 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
     final songs = _playback.playingSongs;
 
     if (updateQueue && !_isSeeking) {
-      final mediaItemKey = song == null
-          ? null
-          : '${song.filePath}|${_playback.duration.inMilliseconds}';
+      if (song == null) {
+        // Al detener, se limpia el metadato para que no quede la pista vieja.
+        if (_lastMediaItemKey != null) {
+          mediaItem.add(null);
+          _lastMediaItemKey = null;
+        }
+      } else {
+        // Mientras la duración real aún no se conoce se usa la del texto.
+        final liveDuration = _playback.duration > Duration.zero
+            ? _playback.duration
+            : null;
+        final mediaItemKey = '${song.filePath}|${liveDuration?.inMilliseconds}';
 
-      if (mediaItemKey != _lastMediaItemKey && song != null) {
-        mediaItem.add(_toMediaItem(song, _playback.duration));
-        _lastMediaItemKey = mediaItemKey;
+        if (mediaItemKey != _lastMediaItemKey) {
+          mediaItem.add(_toMediaItem(song, liveDuration));
+          _lastMediaItemKey = mediaItemKey;
+        }
       }
 
       final queueKey = songs
@@ -133,6 +169,12 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
       just_audio.ProcessingState.idle => AudioProcessingState.idle,
     };
 
+    final repeatMode = switch (_playback.repeatMode) {
+      just_audio.LoopMode.one => AudioServiceRepeatMode.one,
+      just_audio.LoopMode.all => AudioServiceRepeatMode.all,
+      just_audio.LoopMode.off => AudioServiceRepeatMode.none,
+    };
+
     playbackState.add(
       PlaybackState(
         controls: controls,
@@ -140,6 +182,9 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
           MediaAction.seek,
           MediaAction.seekForward,
           MediaAction.seekBackward,
+          MediaAction.skipToQueueItem,
+          MediaAction.setRepeatMode,
+          MediaAction.setShuffleMode,
         },
         androidCompactActionIndices: compactActionIndices,
         processingState: processingState,
@@ -148,6 +193,10 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
         bufferedPosition: _playback.bufferedPosition,
         speed: _playback.speed,
         queueIndex: _playback.currentIndex,
+        repeatMode: repeatMode,
+        shuffleMode: _playback.shuffleEnabled
+            ? AudioServiceShuffleMode.all
+            : AudioServiceShuffleMode.none,
       ),
     );
   }

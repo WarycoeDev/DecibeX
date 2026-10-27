@@ -420,8 +420,22 @@ class AppLocalizations {
   String get reverbEffect => get('reverbEffect');
   String get reverbAndroidOnly => get('reverbAndroidOnly');
 
+  String get transitionTypeTitle => get('transitionTypeTitle');
+  String get transitionTypeSubtitle => get('transitionTypeSubtitle');
+  String get transitionFade => get('transitionFade');
+  String get transitionCrossfade => get('transitionCrossfade');
+  String get crossfadeDurationTitle => get('crossfadeDurationTitle');
+  String get crossfadeDurationSubtitle => get('crossfadeDurationSubtitle');
+
   static const Map<String, Map<String, String>> _catalog = {
     'es': {
+      'transitionTypeTitle': 'Tipo de transición',
+      'transitionTypeSubtitle': 'Elige cómo se encadenan las pistas.',
+      'transitionFade': 'Fade',
+      'transitionCrossfade': 'Crossfade',
+      'crossfadeDurationTitle': 'Duración del crossfade',
+      'crossfadeDurationSubtitle':
+          'Solapamiento entre el final de una pista y el inicio de la siguiente.',
       'audioNotificationChannelName': 'Reproducción de audio',
       'audioNotificationChannelDescription':
           'Controles de reproducción de DecibeX',
@@ -769,7 +783,7 @@ class AppLocalizations {
           'Agrega una carpeta para configurar tus podcasts.',
       'aboutAppName': 'DecibeX',
       'aboutAppTagline': 'Reproductor de música y podcasts',
-      'aboutVersion': 'Versión 1.3.0',
+      'aboutVersion': 'Versión 1.3.1',
       'aboutDescription':
           'DecibeX es un reproductor local enfocado en la calidad de audio, con soporte para ReplayGain, fades de volumen y organización de tu biblioteca musical y de podcasts.',
       'aboutLicenses': 'Licencias de terceros',
@@ -808,6 +822,13 @@ class AppLocalizations {
       'reverbAndroidOnly': 'Solo disponible en Android',
     },
     'en': {
+      'transitionTypeTitle': 'Transition type',
+      'transitionTypeSubtitle': 'Choose how tracks are chained.',
+      'transitionFade': 'Fade',
+      'transitionCrossfade': 'Crossfade',
+      'crossfadeDurationTitle': 'Crossfade duration',
+      'crossfadeDurationSubtitle':
+          'Overlap between the end of one track and the start of the next.',
       'audioNotificationChannelName': 'Audio playback',
       'effects': 'Effects',
       'slowedEffect': 'Slowed',
@@ -1146,7 +1167,7 @@ class AppLocalizations {
       'noPodcastDirectoriesHint': 'Add a folder to configure your podcasts.',
       'aboutAppName': 'DecibeX',
       'aboutAppTagline': 'Music and podcast player',
-      'aboutVersion': 'Version 1.3.0',
+      'aboutVersion': 'Version 1.3.1',
       'aboutDescription':
           'DecibeX is a local player focused on audio quality, with support for ReplayGain, volume fades and organization of your music and podcast library.',
       'aboutLicenses': 'Third-party licenses',

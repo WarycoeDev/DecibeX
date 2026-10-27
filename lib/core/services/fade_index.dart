@@ -146,15 +146,19 @@ class FadeIndex {
   bool get hasFades => _inTable.isNotEmpty || _outTable.isNotEmpty;
 
   /// Ganancia (0..1) que toca en [position].
-  double gainAt(Duration position) {
+  ///
+  /// [fadeIn] / [fadeOut] permiten ignorar una de las dos partes: el
+  /// crossfade reemplaza al fade out de la pista saliente y al fade in de la
+  /// entrante, así que el servicio las desactiva mientras dura la mezcla.
+  double gainAt(Duration position, {bool fadeIn = true, bool fadeOut = true}) {
     final posMs = position.inMicroseconds / 1000.0;
     var gain = 1.0;
 
-    if (_inTable.isNotEmpty && posMs < fadeInMs) {
+    if (fadeIn && _inTable.isNotEmpty && posMs < fadeInMs) {
       gain *= _lookup(_inTable, posMs);
     }
 
-    if (_outTable.isNotEmpty && trackMs > 0) {
+    if (fadeOut && _outTable.isNotEmpty && trackMs > 0) {
       final remaining = trackMs - posMs;
       if (remaining < fadeOutMs) {
         gain *= _lookup(_outTable, math.max(0.0, remaining));

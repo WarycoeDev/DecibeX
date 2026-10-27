@@ -41,6 +41,10 @@ class SettingsService extends ChangeNotifier {
   bool replayGainEnabled = false;
   double replayGainPreamp = 0;
 
+  // --- Tipo de transición ---
+  TransitionType transitionType = TransitionType.fade;
+  double crossfadeDuration = 6; // segundos (0 = desactivado)
+
   bool fadeInEnabled = false;
   bool fadeOutEnabled = false;
   double fadeInDuration = 2;
@@ -75,6 +79,10 @@ class SettingsService extends ChangeNotifier {
 
   /// Velocidad realmente aplicada (1.0 si slow está desactivado).
   double get effectiveSpeed => slowEnabled ? speedForAmount(slowAmount) : 1.0;
+
+  /// Crossfade habilitado (tipo crossfade y duración > 0).
+  bool get crossfadeEnabled =>
+      transitionType == TransitionType.crossfade && crossfadeDuration > 0.05;
 
   /// Ruta del archivo de configuración (útil para mostrar en la UI).
   String? get storagePath =>
@@ -216,6 +224,20 @@ class SettingsService extends ChangeNotifier {
       (v) => replayGainPreamp = v,
     );
 
+    // --- Tipo de transición ---
+    final savedTransition = json['transitionType'] as String?;
+    final parsedTransition = TransitionType.values.firstWhere(
+      (t) => t.name == savedTransition,
+      orElse: () => transitionType,
+    );
+    set(transitionType, parsedTransition, (v) => transitionType = v);
+
+    set(
+      crossfadeDuration,
+      readDouble('crossfadeDuration', crossfadeDuration, 0, 15),
+      (v) => crossfadeDuration = v,
+    );
+
     set(
       fadeInEnabled,
       readBool('fadeInEnabled', fadeInEnabled),
@@ -325,6 +347,23 @@ class SettingsService extends ChangeNotifier {
     _notifyIfAlive();
   }
 
+  /// Cambia el tipo de transición (fade / crossfade). Persiste automáticamente.
+  void setTransitionType(TransitionType value) {
+    if (transitionType == value) return;
+    transitionType = value;
+    _notifyIfAlive();
+    _scheduleSave();
+  }
+
+  /// Potencia del crossfade en segundos (0..15). Persiste automáticamente.
+  void setCrossfadeDuration(double value) {
+    final clamped = value.clamp(0.0, 15.0).toDouble();
+    if (crossfadeDuration == clamped) return;
+    crossfadeDuration = clamped;
+    _notifyIfAlive();
+    _scheduleSave();
+  }
+
   /// Activa/desactiva el efecto "slowed". Persiste automáticamente.
   void setSlowEnabled(bool value) {
     if (slowEnabled == value) return;
@@ -372,6 +411,8 @@ class SettingsService extends ChangeNotifier {
       'language': language.name,
       'replayGainEnabled': replayGainEnabled,
       'replayGainPreamp': replayGainPreamp,
+      'transitionType': transitionType.name,
+      'crossfadeDuration': crossfadeDuration,
       'fadeInEnabled': fadeInEnabled,
       'fadeOutEnabled': fadeOutEnabled,
       'fadeInDuration': fadeInDuration,
@@ -424,3 +465,6 @@ class SettingsService extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Tipo de transición entre pistas.
+enum TransitionType { fade, crossfade }

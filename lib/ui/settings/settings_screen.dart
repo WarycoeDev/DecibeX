@@ -47,6 +47,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _replayGainEnabled = false;
   double _replayGainPreamp = 0;
 
+  TransitionType _transitionType = TransitionType.fade;
+  double _crossfadeDuration = 6;
+
   bool _fadeInEnabled = false;
   bool _fadeOutEnabled = false;
   double _fadeInDuration = 2;
@@ -84,7 +87,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _replayGainPreamp != s.replayGainPreamp ||
         _darkTheme != s.darkTheme ||
         _accentColorValue != s.accentColorValue ||
-        _language != s.language;
+        _language != s.language ||
+        _transitionType != s.transitionType ||
+        _crossfadeDuration != s.crossfadeDuration;
 
     if (!needsUpdate) return;
 
@@ -93,7 +98,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _accentColorValue = s.accentColorValue;
       _replayGainEnabled = s.replayGainEnabled;
       _replayGainPreamp = s.replayGainPreamp;
-      _language = s.language; // [NUEVO] sincroniza el dropdown
+      _language = s.language;
+      _transitionType = s.transitionType;
+      _crossfadeDuration = s.crossfadeDuration;
     });
   }
 
@@ -138,6 +145,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _language = s.language;
       _replayGainEnabled = s.replayGainEnabled;
       _replayGainPreamp = s.replayGainPreamp;
+      _transitionType = s.transitionType;
+      _crossfadeDuration = s.crossfadeDuration;
       _fadeInEnabled = s.fadeInEnabled;
       _fadeOutEnabled = s.fadeOutEnabled;
       _fadeInDuration = s.fadeInDuration;
@@ -179,6 +188,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         s.language = _language;
         s.replayGainEnabled = _replayGainEnabled;
         s.replayGainPreamp = _replayGainPreamp;
+        s.transitionType = _transitionType;
+        s.crossfadeDuration = _crossfadeDuration;
         s.fadeInEnabled = _fadeInEnabled;
         s.fadeOutEnabled = _fadeOutEnabled;
         s.fadeInDuration = _fadeInDuration;
@@ -314,6 +325,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       _replayGainEnabled = false;
       _replayGainPreamp = 0;
+
+      _transitionType = TransitionType.fade;
+      _crossfadeDuration = 6;
 
       _fadeInEnabled = false;
       _fadeOutEnabled = false;
@@ -756,74 +770,153 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _buildDivider(),
         _buildReplayGainAnalyzer(),
         _buildDivider(),
-        _SettingSwitchTile(
-          icon: Icons.trending_up_rounded,
-          title: context.l10n.fadeInTitle,
-          subtitle: context.l10n.fadeInSubtitle,
-          value: _fadeInEnabled,
-          accent: _accentColor,
-          onChanged: (value) {
-            _updateSetting(() {
-              _fadeInEnabled = value;
-            });
-          },
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-          child: _SettingSlider(
-            icon: Icons.timer_outlined,
-            title: context.l10n.fadeInDurationTitle,
-            subtitle: context.l10n.fadeInDurationSubtitle,
-            value: _fadeInDuration,
-            min: 0,
-            max: 10,
-            divisions: 20,
-            accent: _accentColor,
-            valueLabel: '${_fadeInDuration.toStringAsFixed(1)} s',
-            enabled: _fadeInEnabled,
-            onChanged: (value) {
-              setState(() {
-                _fadeInDuration = value;
-              });
-            },
-            onChangeEnd: (_) => _saveSettings(),
-          ),
-        ),
+
+        // --- Tipo de transición ---
+        _buildTransitionTypeSelector(),
+
         _buildDivider(),
-        _SettingSwitchTile(
-          icon: Icons.trending_down_rounded,
-          title: context.l10n.fadeOutTitle,
-          subtitle: context.l10n.fadeOutSubtitle,
-          value: _fadeOutEnabled,
-          accent: _accentColor,
-          onChanged: (value) {
-            _updateSetting(() {
-              _fadeOutEnabled = value;
-            });
-          },
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-          child: _SettingSlider(
-            icon: Icons.timer_outlined,
-            title: context.l10n.fadeOutDurationTitle,
-            subtitle: context.l10n.fadeOutDurationSubtitle,
-            value: _fadeOutDuration,
-            min: 0,
-            max: 10,
-            divisions: 20,
+
+        // --- Contenido condicional según el tipo de transición ---
+        if (_transitionType == TransitionType.crossfade)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
+            child: _SettingSlider(
+              icon: Icons.swap_horiz_rounded,
+              title: context.l10n.crossfadeDurationTitle,
+              subtitle: context.l10n.crossfadeDurationSubtitle,
+              value: _crossfadeDuration,
+              min: 0,
+              max: 15,
+              divisions: 30,
+              accent: _accentColor,
+              valueLabel: '${_crossfadeDuration.toStringAsFixed(1)} s',
+              enabled: true,
+              onChanged: (value) {
+                setState(() {
+                  _crossfadeDuration = value;
+                });
+                SettingsService.instance.setCrossfadeDuration(value);
+              },
+              onChangeEnd: (_) => _saveSettings(),
+            ),
+          )
+        else ...[
+          _SettingSwitchTile(
+            icon: Icons.trending_up_rounded,
+            title: context.l10n.fadeInTitle,
+            subtitle: context.l10n.fadeInSubtitle,
+            value: _fadeInEnabled,
             accent: _accentColor,
-            valueLabel: '${_fadeOutDuration.toStringAsFixed(1)} s',
-            enabled: _fadeOutEnabled,
             onChanged: (value) {
-              setState(() {
-                _fadeOutDuration = value;
+              _updateSetting(() {
+                _fadeInEnabled = value;
               });
             },
-            onChangeEnd: (_) => _saveSettings(),
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+            child: _SettingSlider(
+              icon: Icons.timer_outlined,
+              title: context.l10n.fadeInDurationTitle,
+              subtitle: context.l10n.fadeInDurationSubtitle,
+              value: _fadeInDuration,
+              min: 0,
+              max: 10,
+              divisions: 20,
+              accent: _accentColor,
+              valueLabel: '${_fadeInDuration.toStringAsFixed(1)} s',
+              enabled: _fadeInEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _fadeInDuration = value;
+                });
+              },
+              onChangeEnd: (_) => _saveSettings(),
+            ),
+          ),
+          _buildDivider(),
+          _SettingSwitchTile(
+            icon: Icons.trending_down_rounded,
+            title: context.l10n.fadeOutTitle,
+            subtitle: context.l10n.fadeOutSubtitle,
+            value: _fadeOutEnabled,
+            accent: _accentColor,
+            onChanged: (value) {
+              _updateSetting(() {
+                _fadeOutEnabled = value;
+              });
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+            child: _SettingSlider(
+              icon: Icons.timer_outlined,
+              title: context.l10n.fadeOutDurationTitle,
+              subtitle: context.l10n.fadeOutDurationSubtitle,
+              value: _fadeOutDuration,
+              min: 0,
+              max: 10,
+              divisions: 20,
+              accent: _accentColor,
+              valueLabel: '${_fadeOutDuration.toStringAsFixed(1)} s',
+              enabled: _fadeOutEnabled,
+              onChanged: (value) {
+                setState(() {
+                  _fadeOutDuration = value;
+                });
+              },
+              onChangeEnd: (_) => _saveSettings(),
+            ),
+          ),
+        ],
       ],
+    );
+  }
+
+  /// Selector entre fade y crossfade.
+  Widget _buildTransitionTypeSelector() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SettingHeading(
+            icon: Icons.compare_arrows_rounded,
+            title: context.l10n.transitionTypeTitle,
+            subtitle: context.l10n.transitionTypeSubtitle,
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<TransitionType>(
+              segments: [
+                ButtonSegment(
+                  value: TransitionType.fade,
+                  icon: const Icon(Icons.gradient_rounded, size: 18),
+                  label: Text(context.l10n.transitionFade),
+                ),
+                ButtonSegment(
+                  value: TransitionType.crossfade,
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                  label: Text(context.l10n.transitionCrossfade),
+                ),
+              ],
+              selected: {_transitionType},
+              onSelectionChanged: (selection) {
+                final value = selection.first;
+                _updateSetting(() {
+                  _transitionType = value;
+                });
+                SettingsService.instance.setTransitionType(value);
+              },
+              style: SegmentedButton.styleFrom(
+                selectedBackgroundColor: _accentColor.withValues(alpha: 0.18),
+                selectedForegroundColor: _accentColor,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2469,7 +2562,7 @@ class _SettingSlider extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    max == 12 ? '+12 dB' : '10 s',
+                    max == 12 ? '+12 dB' : (max == 15 ? '15 s' : '10 s'),
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: AppTheme.textSecondary,
                     ),

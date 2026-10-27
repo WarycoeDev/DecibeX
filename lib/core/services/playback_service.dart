@@ -59,7 +59,7 @@ class PlaybackService extends ChangeNotifier {
 
   LoopMode _repeatMode = LoopMode.off;
 
-  // --- Ticker: posición, fades y fin de pista ---
+  // --- Ticker: posición, fades, crossfade y fin de pista ---
 
   /// Frecuencia con la que se lee la posición y se reevalúa el volumen.
   static const Duration _tick = Duration(milliseconds: 40);
@@ -84,6 +84,40 @@ class PlaybackService extends ChangeNotifier {
   double _lastSpeed = 1.0;
   bool _reverbActive = false;
 
+  // --- Crossfade ---
+  //
+  // Diseño (todo guiado por la POSICIÓN de la pista saliente, no por timers
+  // propios, así pausa / seek / velocidad lenta funcionan sin lógica extra):
+  //
+  //  1. PREPARAR: unos segundos antes de la ventana se carga la siguiente
+  //     fuente (sin sonar). Así no hay retraso al arrancar la mezcla.
+  //  2. ARRANCAR: al llegar a `_crossfadeStartMs` se lanza la voz entrante
+  //     a volumen 0.
+  //  3. MEZCLAR: en cada tick, t = (pos - inicio) / duración; la saliente
+  //     baja con cos y la entrante sube con sin (potencia constante).
+  //  4. TERMINAR: con t >= 1 (o si la saliente se acaba) la voz entrante SE
+  //     PROMUEVE tal cual a voz principal. Nunca se vuelve a hacer play() de
+  //     la misma fuente: eso era lo que duplicaba las canciones.
+
+  /// Con cuánta antelación (antes de la ventana) se precarga la siguiente.
+  static const Duration _crossfadePreloadLead = Duration(seconds: 10);
+
+  AudioSource? _nextSource; // lista (cargada) cuando != null
+  SoundHandle? _nextHandle; // sonando cuando != null
+  Song? _nextSong;
+  List<Song>? _pendingShuffleOrder;
+
+  bool _crossfading = false; // voz entrante sonando (mezcla activa)
+  bool _crossfadePreparing = false; // cargando la siguiente fuente
+  bool _crossfadeBlocked = false; // no aplica / falló para esta pista
+  int _crossfadeToken = 0; // invalida preparaciones en vuelo
+  int _crossfadeStartMs = 0; // posición (ms) donde empieza la mezcla
+  int _crossfadeSpanMs = 1; // duración (ms de pista) de la mezcla
+
+  /// La pista actual entró por crossfade: su fade in ya "ocurrió" durante la
+  /// mezcla y no debe volver a aplicarse.
+  bool _enteredViaCrossfade = false;
+
   /// Archivos de más de este tamaño se leen desde disco en vez de memoria
   /// (pensado para podcasts largos).
   static const int _diskLoadThresholdBytes = 64 * 1024 * 1024;
@@ -105,8 +139,19 @@ class PlaybackService extends ChangeNotifier {
 
   ProcessingState get processingState {
     if (_currentSong == null) return ProcessingState.idle;
-    if (_isLoading) return ProcessingState.loading;
-    if (_handle == null) return ProcessingState.completed;
+    if (_isLoading || _handlingCompletion) return ProcessingState.loading;
+
+    if (_handle == null) {
+      // Entre dos pistas (voz liberada pero seguimos "reproduciendo").
+      if (_isPlaying) return ProcessingState.loading;
+
+      // Pausa forzada por el sistema: sigue siendo reanudable.
+      final ended =
+          _duration > Duration.zero &&
+          _position >= _duration - const Duration(seconds: 1);
+      return ended ? ProcessingState.completed : ProcessingState.ready;
+    }
+
     return ProcessingState.ready;
   }
 
@@ -151,6 +196,12 @@ class PlaybackService extends ChangeNotifier {
 
   void _onSettingsChanged() {
     _applyPlaybackEffects();
+
+    // Si se apagó el crossfade, se descarta lo preparado (una mezcla ya en
+    // curso se deja terminar para no cortar el audio de golpe).
+    if (!SettingsService.instance.crossfadeEnabled && !_crossfading) {
+      _cancelCrossfade();
+    }
 
     if (_currentSong == null || _handle == null) return;
     unawaited(_applyVolume());
@@ -201,12 +252,37 @@ class PlaybackService extends ChangeNotifier {
         : _indexOfSong(_shuffleOrder, _currentSong!);
   }
 
+  /// Nuevo orden aleatorio para cuando se completa una vuelta en
+  /// "repetir cola": garantiza que la primera NO sea la que acaba de sonar.
+  List<Song> _shuffleForWrap(Song? current) {
+    final order = List<Song>.from(_playingSongs);
+
+    for (var i = order.length - 1; i > 0; i--) {
+      final j = _random.nextInt(i + 1);
+      final temp = order[i];
+      order[i] = order[j];
+      order[j] = temp;
+    }
+
+    if (current != null &&
+        order.length > 1 &&
+        _sameSong(order.first, current)) {
+      final j = 1 + _random.nextInt(order.length - 1);
+      final temp = order[0];
+      order[0] = order[j];
+      order[j] = temp;
+    }
+
+    return order;
+  }
+
   Future<void> toggleShuffle() => setShuffle(!_shuffleEnabled);
 
   Future<void> setShuffle(bool enabled) async {
     if (_shuffleEnabled == enabled) return;
 
     _shuffleEnabled = enabled;
+    _invalidateCrossfadePlan();
 
     if (enabled) {
       _buildShuffleOrder(keepCurrentFirst: _currentSong);
@@ -226,6 +302,7 @@ class PlaybackService extends ChangeNotifier {
     if (_repeatMode == mode) return;
 
     _repeatMode = mode;
+    _invalidateCrossfadePlan();
 
     final label = switch (mode) {
       LoopMode.one => 'repetir canción',
@@ -274,6 +351,8 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
 
+    _cancelCrossfade();
+
     _playingSongs = availableSongs;
     _currentSong = null;
     _currentQueueIndex = -1;
@@ -319,8 +398,32 @@ class PlaybackService extends ChangeNotifier {
     });
   }
 
-  /// Detiene y libera la voz y la fuente actuales.
+  Future<void> _disposeSourceQuietly(AudioSource? source) async {
+    if (source == null) return;
+
+    try {
+      // Al liberar la fuente también se detienen sus voces.
+      await _soloud.disposeSource(source);
+    } catch (error) {
+      debugPrint('[PlaybackService] Error liberando la fuente: $error');
+    }
+  }
+
+  /// Detiene y libera la voz y la fuente actuales (y cualquier voz entrante
+  /// de un crossfade en curso o ya preparada).
   Future<void> _releaseVoice() async {
+    // Invalida cualquier preparación de crossfade que siga en vuelo.
+    _crossfadeToken++;
+    _crossfadePreparing = false;
+    _crossfadeBlocked = false;
+    _crossfading = false;
+    _pendingShuffleOrder = null;
+
+    final nextSource = _nextSource;
+    _nextSource = null;
+    _nextHandle = null;
+    _nextSong = null;
+
     final source = _source;
 
     _handle = null;
@@ -328,14 +431,8 @@ class PlaybackService extends ChangeNotifier {
     _lastAppliedVolume = -1;
     _syncTicker();
 
-    if (source != null) {
-      try {
-        // Al liberar la fuente también se detienen sus voces.
-        await _soloud.disposeSource(source);
-      } catch (error) {
-        debugPrint('[PlaybackService] Error liberando la fuente: $error');
-      }
-    }
+    await _disposeSourceQuietly(nextSource);
+    await _disposeSourceQuietly(source);
   }
 
   Duration _livePosition() {
@@ -349,13 +446,7 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
-  /// Comprueba si la voz actual sigue siendo válida en el motor.
-  ///
-  /// Tras pausar en background (pérdida de audio focus, desconexión de
-  /// Bluetooth, suspensión del proceso) el handle puede quedar colgado pero
-  /// la voz ya no existir. En ese caso hay que recargar la pista.
-  bool _isHandleAlive() {
-    final handle = _handle;
+  bool _isValid(SoundHandle? handle) {
     if (handle == null) return false;
 
     try {
@@ -365,8 +456,15 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
+  /// Comprueba si la voz actual sigue siendo válida en el motor.
+  ///
+  /// Tras pausar en background (pérdida de audio focus, desconexión de
+  /// Bluetooth, suspensión del proceso) el handle puede quedar colgado pero
+  /// la voz ya no existir. En ese caso hay que recargar la pista.
+  bool _isHandleAlive() => _isValid(_handle);
+
   // ===========================================================================
-  // TICKER · posición, fades y fin de pista
+  // TICKER · posición, fades, crossfade y fin de pista
   // ===========================================================================
 
   /// El ticker corre solo mientras hay una voz sonando.
@@ -387,28 +485,9 @@ class PlaybackService extends ChangeNotifier {
     if (handle == null || !_isPlaying || _isLoading) return;
 
     // La voz deja de ser válida cuando la pista termina, pero también si el
-    // sistema la invalida en background (audio focus perdido, Bluetooth
-    // desconectado, proceso suspendido). Solo es "fin de pista" si estamos
-    // cerca del final real; si no, se trata como una pausa forzada para que
-    // el usuario pueda reanudar.
-    if (!_soloud.getIsValidVoiceHandle(handle)) {
-      _handle = null;
-      _syncTicker();
-
-      final nearEnd =
-          _duration > Duration.zero &&
-          _position >= _duration - const Duration(seconds: 1);
-
-      if (!nearEnd) {
-        debugPrint(
-          '[PlaybackService] Voz invalidada por el sistema; se marca pausa.',
-        );
-        _isPlaying = false;
-        notifyListeners();
-        return;
-      }
-
-      unawaited(_handleTrackCompleted());
+    // sistema la invalida en background.
+    if (!_isValid(handle)) {
+      _onVoiceEnded();
       return;
     }
 
@@ -416,7 +495,12 @@ class PlaybackService extends ChangeNotifier {
     _position = position;
 
     final settings = SettingsService.instance;
-    if (settings.fadeInEnabled || settings.fadeOutEnabled) {
+
+    // Crossfade: preparar, arrancar, mezclar y terminar (todo por posición).
+    _driveCrossfade(position);
+
+    // Durante la mezcla el volumen lo gobierna _mixCrossfade.
+    if (!_crossfading && (settings.fadeInEnabled || settings.fadeOutEnabled)) {
       unawaited(_applyVolume(at: position));
     }
 
@@ -430,6 +514,38 @@ class PlaybackService extends ChangeNotifier {
 
       notifyListeners();
     }
+  }
+
+  /// La voz principal dejó de existir: fin de pista o invalidación externa.
+  void _onVoiceEnded() {
+    // Solo es "fin de pista" si estamos cerca del final real; si no, se
+    // trata como una pausa forzada para que el usuario pueda reanudar.
+    final nearEnd =
+        _duration > Duration.zero &&
+        _position >= _duration - const Duration(seconds: 1);
+
+    if (!nearEnd) {
+      debugPrint(
+        '[PlaybackService] Voz invalidada por el sistema; se marca pausa.',
+      );
+      _handle = null;
+      _isPlaying = false;
+      _cancelCrossfade();
+      _syncTicker();
+      notifyListeners();
+      return;
+    }
+
+    // Había una siguiente pista lista (mezcla en curso o solo precargada):
+    // se promueve en lugar de recargarla, sin hueco ni duplicado.
+    if (_nextSource != null && (_crossfading || _startNextVoice())) {
+      unawaited(_finishCrossfade());
+      return;
+    }
+
+    _handle = null;
+    _syncTicker();
+    unawaited(_handleTrackCompleted());
   }
 
   // ===========================================================================
@@ -457,6 +573,12 @@ class PlaybackService extends ChangeNotifier {
     try {
       _soloud.setRelativePlaySpeed(handle, speed);
       _lastSpeed = speed;
+
+      // La voz entrante del crossfade (si la hay) también cambia de velocidad.
+      final nextHandle = _nextHandle;
+      if (nextHandle != null && _isValid(nextHandle)) {
+        _soloud.setRelativePlaySpeed(nextHandle, speed);
+      }
     } catch (error) {
       debugPrint('[PlaybackService] No se pudo cambiar la velocidad: $error');
     }
@@ -571,7 +693,16 @@ class PlaybackService extends ChangeNotifier {
     if (song == null || _handle == null) return;
 
     final position = at ?? _livePosition();
-    final fadeGain = _currentFadeIndex()?.gainAt(position) ?? 1.0;
+
+    // Durante un crossfade el volumen de ambas voces sale de la mezcla.
+    if (_crossfading) {
+      _mixCrossfade(position);
+      return;
+    }
+
+    final fadeGain =
+        _currentFadeIndex()?.gainAt(position, fadeIn: !_enteredViaCrossfade) ??
+        1.0;
     final target = (_baseVolume(song) * fadeGain).clamp(0.0, 4.0).toDouble();
 
     if (!force) {
@@ -589,10 +720,332 @@ class PlaybackService extends ChangeNotifier {
   }
 
   // ===========================================================================
+  // CROSSFADE
+  // ===========================================================================
+
+  /// Duración (en tiempo de PISTA) de la mezcla. 0 si está desactivado o la
+  /// pista es muy corta. Se ajusta a la velocidad para que dure lo
+  /// configurado en tiempo real aunque la pista vaya lenta.
+  Duration _crossfadeDuration() {
+    final settings = SettingsService.instance;
+    if (!settings.crossfadeEnabled) return Duration.zero;
+
+    if (_duration <= const Duration(seconds: 2)) return Duration.zero;
+
+    var ms = (settings.crossfadeDuration * 1000 * settings.effectiveSpeed)
+        .round();
+    // Nunca más de la mitad de la pista.
+    ms = min(ms, _duration.inMilliseconds ~/ 2);
+    return Duration(milliseconds: max(0, ms));
+  }
+
+  /// Quita todo lo preparado para el crossfade (y, si la mezcla estaba
+  /// activa, devuelve la pista actual a su volumen normal).
+  void _cancelCrossfade() {
+    if (!_crossfading &&
+        !_crossfadePreparing &&
+        _nextSource == null &&
+        !_crossfadeBlocked) {
+      return;
+    }
+
+    _crossfadeToken++;
+    _crossfadePreparing = false;
+    _crossfadeBlocked = false;
+    _pendingShuffleOrder = null;
+
+    final wasActive = _crossfading;
+    final source = _nextSource;
+
+    _crossfading = false;
+    _nextSource = null;
+    _nextHandle = null;
+    _nextSong = null;
+
+    unawaited(_disposeSourceQuietly(source));
+
+    if (wasActive && _handle != null) {
+      unawaited(_applyVolume(force: true));
+    }
+  }
+
+  /// Cambió la cola / aleatorio / repetición: la "siguiente" decidida puede
+  /// ya no ser válida. Si la mezcla ya suena, se deja terminar.
+  void _invalidateCrossfadePlan() {
+    if (!_crossfading) _cancelCrossfade();
+  }
+
+  /// Paso 1: carga la siguiente fuente (sin reproducirla).
+  Future<void> _prepareCrossfade() async {
+    if (_crossfadePreparing ||
+        _crossfading ||
+        _nextSource != null ||
+        _crossfadeBlocked) {
+      return;
+    }
+
+    final current = _currentSong;
+    if (current == null) return;
+
+    // En "repetir canción" la mezcla es consigo misma.
+    final next = _repeatMode == LoopMode.one
+        ? current
+        : _getNextSong(commit: false);
+
+    // Sin siguiente (fin de cola) o podcasts: transición normal.
+    if (next == null || current.isPodcast || next.isPodcast) {
+      _crossfadeBlocked = true;
+      return;
+    }
+
+    final path = next.filePath;
+    if (path == null || path.isEmpty) {
+      _crossfadeBlocked = true;
+      return;
+    }
+
+    final token = _crossfadeToken;
+    _crossfadePreparing = true; // síncrono: evita preparaciones duplicadas
+
+    AudioSource? source;
+
+    try {
+      final exists = await File(path).exists();
+      if (token != _crossfadeToken) return;
+
+      if (!exists) {
+        _crossfadeBlocked = true;
+        return;
+      }
+
+      await _ensureEngine();
+
+      final fileSize = await File(path).length();
+      source = await _soloud.loadFile(
+        path,
+        mode: fileSize > _diskLoadThresholdBytes
+            ? LoadMode.disk
+            : LoadMode.memory,
+      );
+
+      // Mientras cargaba cambió la pista / la cola: se descarta.
+      if (token != _crossfadeToken) {
+        await _disposeSourceQuietly(source);
+        return;
+      }
+
+      // La mezcla no puede durar más de la mitad de la pista entrante.
+      final nextLength = _soloud.getLength(source);
+      final span = min(
+        _crossfadeDuration().inMilliseconds,
+        nextLength.inMilliseconds ~/ 2,
+      );
+
+      if (span < 300) {
+        await _disposeSourceQuietly(source);
+        _crossfadeBlocked = true;
+        return;
+      }
+
+      _nextSource = source;
+      _nextSong = next;
+      _crossfadeSpanMs = span;
+      _crossfadeStartMs = _duration.inMilliseconds - span;
+    } catch (error) {
+      debugPrint('[PlaybackService] Error preparando crossfade: $error');
+      unawaited(_disposeSourceQuietly(source));
+      if (token == _crossfadeToken) _crossfadeBlocked = true;
+    } finally {
+      if (token == _crossfadeToken) _crossfadePreparing = false;
+    }
+  }
+
+  /// Paso 2: lanza la voz entrante a volumen 0. [lateMs] es cuánto se pasó
+  /// ya del inicio de la ventana (si la precarga tardó), para mantener
+  /// ambas pistas alineadas con la mezcla.
+  bool _startNextVoice({int lateMs = 0}) {
+    final source = _nextSource;
+    if (source == null) return false;
+    if (_crossfading) return true;
+
+    try {
+      final handle = _soloud.play(source, volume: 0.0, paused: true);
+
+      final speed = SettingsService.instance.effectiveSpeed;
+      if ((speed - 1.0).abs() > 0.0005) {
+        _soloud.setRelativePlaySpeed(handle, speed);
+      }
+
+      final offsetMs = min(lateMs, _crossfadeSpanMs);
+      if (offsetMs > 150) {
+        try {
+          _soloud.seek(handle, Duration(milliseconds: offsetMs));
+        } catch (_) {}
+      }
+
+      _soloud.setPause(handle, false);
+
+      _nextHandle = handle;
+      _crossfading = true;
+      return true;
+    } catch (error) {
+      debugPrint(
+        '[PlaybackService] No se pudo iniciar la voz entrante: $error',
+      );
+      return false;
+    }
+  }
+
+  /// Orquesta las fases del crossfade en cada tick.
+  void _driveCrossfade(Duration position) {
+    if (_currentSong == null || _handlingCompletion) return;
+
+    if (!_crossfading) {
+      final cf = _crossfadeDuration();
+      if (cf <= Duration.zero || _crossfadeBlocked) return;
+
+      // Fase 1: precargar con antelación.
+      if (_nextSource == null) {
+        final preloadAt = _duration - cf - _crossfadePreloadLead;
+
+        if (!_crossfadePreparing && position >= preloadAt) {
+          unawaited(_prepareCrossfade());
+        }
+        return;
+      }
+
+      // Fase 2: arrancar al entrar en la ventana.
+      if (position.inMilliseconds < _crossfadeStartMs) return;
+
+      if (!_startNextVoice(
+        lateMs: position.inMilliseconds - _crossfadeStartMs,
+      )) {
+        _cancelCrossfade();
+        _crossfadeBlocked = true;
+        return;
+      }
+    }
+
+    // Fase 3: mezclar. Fase 4: terminar.
+    final t = _mixCrossfade(position);
+    if (t >= 1.0) unawaited(_finishCrossfade());
+  }
+
+  /// Aplica los volúmenes de ambas voces según el progreso (0..1) de la
+  /// mezcla, que sale de la posición de la pista saliente. Curva de potencia
+  /// constante (cos/sin): sin "hueco" de volumen a mitad de la mezcla.
+  double _mixCrossfade(Duration position) {
+    final span = max(1, _crossfadeSpanMs);
+    final t = ((position.inMilliseconds - _crossfadeStartMs) / span)
+        .clamp(0.0, 1.0)
+        .toDouble();
+
+    final song = _currentSong;
+    final next = _nextSong;
+    if (song == null || next == null) return t;
+
+    final angle = t * pi / 2;
+
+    // La saliente conserva su fade in (si aún lo tiene) pero NO su fade out:
+    // el crossfade ya es su fade out.
+    final fadeGain =
+        _currentFadeIndex()?.gainAt(
+          position,
+          fadeIn: !_enteredViaCrossfade,
+          fadeOut: false,
+        ) ??
+        1.0;
+
+    final outVolume = (_baseVolume(song) * fadeGain * cos(angle))
+        .clamp(0.0, 4.0)
+        .toDouble();
+    final inVolume = (_baseVolume(next) * sin(angle))
+        .clamp(0.0, 4.0)
+        .toDouble();
+
+    try {
+      final outHandle = _handle;
+      if (outHandle != null && _isValid(outHandle)) {
+        _soloud.setVolume(outHandle, outVolume);
+      }
+
+      final inHandle = _nextHandle;
+      if (inHandle != null && _isValid(inHandle)) {
+        _soloud.setVolume(inHandle, inVolume);
+      }
+    } catch (error) {
+      debugPrint('[PlaybackService] No se pudo mezclar el crossfade: $error');
+    }
+
+    _lastAppliedVolume = outVolume;
+    return t;
+  }
+
+  /// Paso 4: la voz entrante pasa a ser la principal, TAL CUAL (misma voz,
+  /// misma posición). El intercambio de estado es síncrono (antes del primer
+  /// await) para que ningún tick vea un estado a medias.
+  Future<void> _finishCrossfade() async {
+    if (!_crossfading) return;
+
+    final nextSource = _nextSource;
+    final nextHandle = _nextHandle;
+    final nextSong = _nextSong;
+
+    if (nextSource == null || nextHandle == null || nextSong == null) {
+      _cancelCrossfade();
+      return;
+    }
+
+    final oldSource = _source;
+    final pendingShuffle = _pendingShuffleOrder;
+
+    // --- Intercambio síncrono ---
+    _crossfadeToken++;
+    _crossfading = false;
+    _crossfadePreparing = false;
+    _crossfadeBlocked = false;
+    _pendingShuffleOrder = null;
+    _nextSource = null;
+    _nextHandle = null;
+    _nextSong = null;
+
+    _source = nextSource;
+    _handle = nextHandle;
+    _currentSong = nextSong;
+    _enteredViaCrossfade = true;
+
+    _duration = _soloud.getLength(nextSource);
+    _position = _livePosition();
+    _currentQueueIndex = _indexOfSong(_playingSongs, nextSong);
+
+    if (_shuffleEnabled) {
+      if (pendingShuffle != null) _shuffleOrder = pendingShuffle;
+      _shuffleCursor = _indexOfSong(_shuffleOrder, nextSong);
+    }
+
+    StatisticsService.instance.onSongChanged(nextSong);
+    PodcastStatisticsService.instance.onSongChanged(nextSong);
+    PodcastStatisticsService.instance.onDurationChanged(_duration);
+
+    // La voz promovida ya iba a la velocidad vigente (_lastSpeed se mantiene).
+    _lastAppliedVolume = -1;
+    _applyPlaybackEffects();
+    unawaited(_applyVolume(force: true));
+
+    _isPlaying = true;
+    _lastPositionNotify = DateTime.fromMillisecondsSinceEpoch(0);
+    _syncTicker();
+    notifyListeners();
+
+    // Recién ahora (ya sin riesgo de carreras) se libera la pista saliente.
+    await _disposeSourceQuietly(oldSource);
+  }
+
+  // ===========================================================================
   // REPRODUCCIÓN
   // ===========================================================================
 
-  Future<void> _loadAndPlaySong(Song song) async {
+  Future<void> _loadAndPlaySong(Song song, {Duration? startAt}) async {
     final path = song.filePath;
 
     if (path == null || path.isEmpty || !await File(path).exists()) {
@@ -602,12 +1055,13 @@ class PlaybackService extends ChangeNotifier {
 
     final token = ++_loadToken;
 
-    // Se libera la pista anterior antes de tocar el estado.
+    // Se libera la pista anterior (y cualquier crossfade pendiente).
     await _releaseVoice();
 
     _position = Duration.zero;
     _duration = Duration.zero;
     _currentSong = song;
+    _enteredViaCrossfade = false;
     _currentQueueIndex = _indexOfSong(_playingSongs, song);
 
     StatisticsService.instance.onSongChanged(song);
@@ -624,10 +1078,13 @@ class PlaybackService extends ChangeNotifier {
 
     notifyListeners();
 
-    // Reanudar podcasts desde la posición guardada (si no terminó).
-    final initialPosition = song.isPodcast
-        ? PodcastStatisticsService.instance.resumePositionFor(song)
-        : Duration.zero;
+    // Posición inicial: la pedida explícitamente (p. ej. al recargar tras
+    // una invalidación en background) o, en podcasts, la guardada.
+    final initialPosition =
+        startAt ??
+        (song.isPodcast
+            ? PodcastStatisticsService.instance.resumePositionFor(song)
+            : Duration.zero);
 
     try {
       await _ensureEngine();
@@ -642,9 +1099,7 @@ class PlaybackService extends ChangeNotifier {
 
       // Mientras cargaba, el usuario eligió otra pista: se descarta esta.
       if (token != _loadToken) {
-        try {
-          await _soloud.disposeSource(source);
-        } catch (_) {}
+        await _disposeSourceQuietly(source);
         return;
       }
 
@@ -656,11 +1111,6 @@ class PlaybackService extends ChangeNotifier {
       // dejan listos ANTES de que suene el primer sample (sin "tramitos" a
       // volumen pleno ni saltos de velocidad).
       final handle = _soloud.play(source, volume: 0.0, paused: true);
-
-      if (token != _loadToken) {
-        await _releaseVoice();
-        return;
-      }
 
       _handle = handle;
       _lastSpeed = 1.0; // una voz nueva siempre arranca a velocidad normal
@@ -708,6 +1158,7 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
 
+    _invalidateCrossfadePlan();
     _playingSongs.add(song);
 
     if (_shuffleEnabled) {
@@ -752,6 +1203,8 @@ class PlaybackService extends ChangeNotifier {
 
     if (!queue.move(oldIndex, newIndex)) return;
 
+    _invalidateCrossfadePlan();
+
     final reorderedSongs = queue.songs;
 
     _playingSongs = reorderedSongs
@@ -795,10 +1248,17 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
 
+    // La que está entrando por crossfade ya está sonando: tampoco.
+    final incoming = _nextSong;
+    if (_crossfading && incoming != null && _sameSong(incoming, song)) {
+      return;
+    }
+
     final queue = PlaybackQueue.instance;
 
     if (!queue.contains(song)) return;
 
+    _invalidateCrossfadePlan();
     queue.remove(song);
 
     _playingSongs.removeWhere((item) => _sameSong(item, song));
@@ -825,11 +1285,35 @@ class PlaybackService extends ChangeNotifier {
       _soloud.setPause(handle, true);
     }
 
+    // Pausar también la voz entrante si estamos en crossfade.
+    final nextHandle = _nextHandle;
+    if (nextHandle != null && _isValid(nextHandle)) {
+      try {
+        _soloud.setPause(nextHandle, true);
+      } catch (_) {}
+    }
+
     _isPlaying = false;
     _syncTicker();
     notifyListeners();
 
     await PodcastStatisticsService.instance.flush();
+  }
+
+  /// Punto desde el que recargar la pista actual si su voz murió (para no
+  /// volver al segundo 0 tras una invalidación en background).
+  Duration? _resumePointForReload() {
+    final song = _currentSong;
+    if (song == null) return null;
+
+    if (_position <= const Duration(seconds: 1)) return null;
+
+    if (_duration > Duration.zero &&
+        _position >= _duration - const Duration(seconds: 1)) {
+      return null;
+    }
+
+    return _position;
   }
 
   Future<void> resume() async {
@@ -840,21 +1324,27 @@ class PlaybackService extends ChangeNotifier {
       return;
     }
 
-    final handle = _handle;
+    var handle = _handle;
+
+    // Mezcla en curso cuya pista saliente ya terminó: se promueve la entrante.
+    if (handle != null && !_isHandleAlive() && _crossfading) {
+      await _finishCrossfade();
+      handle = _handle;
+    }
 
     // Sin voz, o voz invalidada por el sistema (background, pérdida de audio
-    // focus, Bluetooth desconectado): se vuelve a cargar desde cero en vez
-    // de intentar reanudar una voz muerta.
+    // focus, Bluetooth desconectado): se vuelve a cargar, retomando desde la
+    // posición donde estaba, en vez de intentar reanudar una voz muerta.
     if (handle == null || !_isHandleAlive()) {
       debugPrint(
         '[PlaybackService] Voz no válida al reanudar; recargando pista.',
       );
-      await _loadAndPlaySong(_currentSong!);
+      await _loadAndPlaySong(_currentSong!, startAt: _resumePointForReload());
       return;
     }
 
     // Volumen que toca en la posición actual (si se pausó a mitad de un
-    // fade, continúa desde ahí) antes de que vuelva a sonar.
+    // fade o de un crossfade, continúa desde ahí) antes de que vuelva a sonar.
     await _applyVolume(force: true);
 
     try {
@@ -863,8 +1353,16 @@ class PlaybackService extends ChangeNotifier {
       debugPrint(
         '[PlaybackService] Fallo al reanudar la voz; recargando: $error',
       );
-      await _loadAndPlaySong(_currentSong!);
+      await _loadAndPlaySong(_currentSong!, startAt: _resumePointForReload());
       return;
+    }
+
+    // Reanudar también la voz entrante si estamos en crossfade.
+    final nextHandle = _nextHandle;
+    if (nextHandle != null && _isValid(nextHandle)) {
+      try {
+        _soloud.setPause(nextHandle, false);
+      } catch (_) {}
     }
 
     _isPlaying = true;
@@ -957,7 +1455,12 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
-  Song? _getNextSong() {
+  /// Siguiente canción según cola / aleatorio / repetición.
+  ///
+  /// Con [commit] = false no modifica el estado: es solo una "mirada" (la usa
+  /// el crossfade). Si la vuelta aleatoria se completa, el nuevo orden se
+  /// guarda en [_pendingShuffleOrder] y se aplica al promover la pista.
+  Song? _getNextSong({bool commit = true}) {
     if (_shuffleEnabled) {
       if (_shuffleCursor < 0) return null;
 
@@ -967,22 +1470,17 @@ class PlaybackService extends ChangeNotifier {
 
       if (_repeatMode == LoopMode.all && _shuffleOrder.length > 1) {
         final current = _currentSong;
-        _buildShuffleOrder(keepCurrentFirst: null);
+        final order = _shuffleForWrap(current);
 
-        if (current != null &&
-            _shuffleOrder.length > 1 &&
-            _sameSong(_shuffleOrder.first, current)) {
-          final nextIndex = 1 + _random.nextInt(_shuffleOrder.length - 1);
-          final temp = _shuffleOrder[1];
-          _shuffleOrder[1] = _shuffleOrder[nextIndex];
-          _shuffleOrder[nextIndex] = temp;
+        if (commit) {
+          _shuffleOrder = order;
+          _pendingShuffleOrder = null;
+          _shuffleCursor = current == null ? -1 : _indexOfSong(order, current);
+        } else {
+          _pendingShuffleOrder = order;
         }
 
-        _shuffleCursor = -1;
-        return _shuffleOrder.firstWhere(
-          (item) => current == null || !_sameSong(item, current),
-          orElse: () => _shuffleOrder.first,
-        );
+        return order.first;
       }
 
       return null;
@@ -1078,6 +1576,30 @@ class PlaybackService extends ChangeNotifier {
 
     _position = target;
 
+    // Volver al inicio de una pista que entró por crossfade: su fade in
+    // vuelve a aplicar como en cualquier otra pista.
+    if (target < const Duration(seconds: 1)) _enteredViaCrossfade = false;
+
+    // Mezcla activa: si se salta antes de la ventana se cancela; si se salta
+    // dentro de ella, la entrante se realinea con el nuevo progreso.
+    if (_crossfading) {
+      final offsetMs = target.inMilliseconds - _crossfadeStartMs;
+
+      if (offsetMs < 0) {
+        _cancelCrossfade();
+      } else {
+        final nextHandle = _nextHandle;
+        if (nextHandle != null && _isValid(nextHandle)) {
+          try {
+            _soloud.seek(
+              nextHandle,
+              Duration(milliseconds: min(offsetMs, _crossfadeSpanMs)),
+            );
+          } catch (_) {}
+        }
+      }
+    }
+
     StatisticsService.instance.onSeek(target);
     PodcastStatisticsService.instance.onSeek(target);
 
@@ -1096,7 +1618,7 @@ class PlaybackService extends ChangeNotifier {
     _fadeIndex = null;
     _fadeIndexKey = null;
 
-    await _releaseVoice();
+    await _releaseVoice(); // también limpia el crossfade
 
     _playingSongs = [];
     _shuffleOrder = [];
@@ -1108,6 +1630,7 @@ class PlaybackService extends ChangeNotifier {
     _isPlaying = false;
     _isLoading = false;
     _handlingCompletion = false;
+    _enteredViaCrossfade = false;
     _lastSpeed = 1.0;
 
     StatisticsService.instance.onSongChanged(null);
