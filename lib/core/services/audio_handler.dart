@@ -24,7 +24,13 @@ class DecibeXAudioHandler extends BaseAudioHandler with SeekHandler {
   String? _lastQueueKey;
 
   @override
-  Future<void> play() => _playback.resume();
+  Future<void> play() async {
+    // resume() puede recargar la pista si la voz quedó invalidada en
+    // background (audio focus perdido, Bluetooth desconectado, proceso
+    // suspendido). En ese caso el estado se publica solo al terminar.
+    await _playback.resume();
+    _publishPlaybackState();
+  }
 
   @override
   Future<void> pause() => _playback.pause();

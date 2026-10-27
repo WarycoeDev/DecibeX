@@ -349,6 +349,22 @@ class PlaybackService extends ChangeNotifier {
     }
   }
 
+  /// Comprueba si la voz actual sigue siendo válida en el motor.
+  ///
+  /// Tras pausar en background (pérdida de audio focus, desconexión de
+  /// Bluetooth, suspensión del proceso) el handle puede quedar colgado pero
+  /// la voz ya no existir. En ese caso hay que recargar la pista.
+  bool _isHandleAlive() {
+    final handle = _handle;
+    if (handle == null) return false;
+
+    try {
+      return _soloud.getIsValidVoiceHandle(handle);
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ===========================================================================
   // TICKER · posición, fades y fin de pista
   // ===========================================================================
@@ -370,10 +386,28 @@ class PlaybackService extends ChangeNotifier {
 
     if (handle == null || !_isPlaying || _isLoading) return;
 
-    // La voz deja de ser válida cuando la pista termina.
+    // La voz deja de ser válida cuando la pista termina, pero también si el
+    // sistema la invalida en background (audio focus perdido, Bluetooth
+    // desconectado, proceso suspendido). Solo es "fin de pista" si estamos
+    // cerca del final real; si no, se trata como una pausa forzada para que
+    // el usuario pueda reanudar.
     if (!_soloud.getIsValidVoiceHandle(handle)) {
       _handle = null;
       _syncTicker();
+
+      final nearEnd =
+          _duration > Duration.zero &&
+          _position >= _duration - const Duration(seconds: 1);
+
+      if (!nearEnd) {
+        debugPrint(
+          '[PlaybackService] Voz invalidada por el sistema; se marca pausa.',
+        );
+        _isPlaying = false;
+        notifyListeners();
+        return;
+      }
+
       unawaited(_handleTrackCompleted());
       return;
     }
@@ -786,7 +820,7 @@ class PlaybackService extends ChangeNotifier {
   Future<void> pause() async {
     final handle = _handle;
 
-    if (handle != null) {
+    if (handle != null && _isHandleAlive()) {
       _position = _livePosition();
       _soloud.setPause(handle, true);
     }
@@ -808,8 +842,13 @@ class PlaybackService extends ChangeNotifier {
 
     final handle = _handle;
 
-    // Sin voz = la pista terminó (o falló): se vuelve a cargar desde cero.
-    if (handle == null) {
+    // Sin voz, o voz invalidada por el sistema (background, pérdida de audio
+    // focus, Bluetooth desconectado): se vuelve a cargar desde cero en vez
+    // de intentar reanudar una voz muerta.
+    if (handle == null || !_isHandleAlive()) {
+      debugPrint(
+        '[PlaybackService] Voz no válida al reanudar; recargando pista.',
+      );
       await _loadAndPlaySong(_currentSong!);
       return;
     }
@@ -818,7 +857,16 @@ class PlaybackService extends ChangeNotifier {
     // fade, continúa desde ahí) antes de que vuelva a sonar.
     await _applyVolume(force: true);
 
-    _soloud.setPause(handle, false);
+    try {
+      _soloud.setPause(handle, false);
+    } catch (error) {
+      debugPrint(
+        '[PlaybackService] Fallo al reanudar la voz; recargando: $error',
+      );
+      await _loadAndPlaySong(_currentSong!);
+      return;
+    }
+
     _isPlaying = true;
     _syncTicker();
     notifyListeners();
@@ -1014,7 +1062,7 @@ class PlaybackService extends ChangeNotifier {
 
   Future<void> seek(Duration position) async {
     final handle = _handle;
-    if (handle == null) return;
+    if (handle == null || !_isHandleAlive()) return;
 
     var target = position;
 

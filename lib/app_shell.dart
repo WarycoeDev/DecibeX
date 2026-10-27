@@ -507,7 +507,7 @@ class _AppShellState extends State<AppShell> {
           Container(
             height: 24,
             width: 1,
-            margin: const EdgeInsets.symmetric(horizontal: 10),
+            margin: const EdgeInsets.only(left: 10, right: 10),
             color: AppTheme.surfaceVariant,
           ),
           Expanded(
@@ -517,6 +517,15 @@ class _AppShellState extends State<AppShell> {
               switchOutCurve: Curves.easeIn,
               transitionBuilder: (child, animation) {
                 return FadeTransition(opacity: animation, child: child);
+              },
+              layoutBuilder: (currentChild, previousChildren) {
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    ...previousChildren,
+                    if (currentChild != null) currentChild,
+                  ],
+                );
               },
               child: Text(
                 _titles(context)[_selectedIndex],
